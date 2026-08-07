@@ -42,6 +42,38 @@ class ExecutionAdapter(Protocol):
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
 
+_EXECUTION_INPUT_FIELDS = {
+    "capability_id",
+    "requested_permissions",
+    "requested_effects",
+    "estimated_costs",
+    "action",
+}
+_EXECUTION_RECEIPT_FIELDS = {
+    "schema",
+    "request_id",
+    "mission_id",
+    "mission_revision",
+    "adapter_ref",
+    "status",
+    "artifact_refs",
+    "observed_effects",
+    "external_receipt_ref",
+    "coverage_limits",
+}
+_CAPABILITY_RESULT_REQUIRED = {
+    "schema",
+    "request_id",
+    "status",
+    "artifact_refs",
+    "observed_effects",
+    "returned_control_point",
+    "coverage_limits",
+}
+_CAPABILITY_RESULT_ALLOWED = _CAPABILITY_RESULT_REQUIRED | {"verdict"}
+_RESULT_STATUSES = {"completed", "declined", "blocked", "failed"}
+
+
 def normalize_invocation_intent(text: str) -> str:
     normalized = " ".join(text.casefold().split())
     if any(
@@ -50,6 +82,14 @@ def normalize_invocation_intent(text: str) -> str:
     ):
         return "manifest"
     return normalized
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _string_list(value: object) -> bool:
+    return isinstance(value, list) and all(_nonempty_string(item) for item in value)
 
 
 def _return_point(
@@ -63,6 +103,31 @@ def _return_point(
     return ReturnPoint(
         manifest.mission_id, manifest.revision, frontier_index, label
     )
+
+
+def _request_id(
+    manifest: MissionManifest,
+    capability_id: str,
+    frontier_index: int,
+    kind: str,
+) -> str:
+    return (
+        f"{manifest.mission_id}:r{manifest.revision}:"
+        f"{capability_id}:{kind}:f{frontier_index}"
+    )
+
+
+def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
+    if set(request) != _EXECUTION_INPUT_FIELDS:
+        return "fields"
+    if not _nonempty_string(request.get("capability_id")):
+        return "capability_id"
+    if not _nonempty_string(request.get("action")):
+        return "action"
+    for field in ("requested_permissions", "requested_effects", "estimated_costs"):
+        if not _string_list(request.get(field)):
+            return field
+    return None
 
 
 def coordinate_once(
@@ -106,10 +171,20 @@ def coordinate_once(
                 None,
                 _return_point(manifest, frontier_index),
             )
+        authority_errors = authorize_action(
+            manifest,
+            selected_capability.capability_id,
+            list(selected_capability.authority_required),
+            [],
+            [],
+        )
+        if authority_errors:
+            return CoordinationDecision(
+                "BLOCK", " | ".join(authority_errors), None, _return_point(manifest, frontier_index)
+            )
         point = _return_point(manifest, frontier_index)
-        request_id = (
-            f"{manifest.mission_id}:r{manifest.revision}:"
-            f"{selected_capability.capability_id}:f{frontier_index}"
+        request_id = _request_id(
+            manifest, selected_capability.capability_id, frontier_index, "capability"
         )
         request = {
             "schema": "capability-request@1",
@@ -130,24 +205,31 @@ def coordinate_once(
         return CoordinationDecision("REQUEST_CAPABILITY", reason, request, point)
 
     if execution_request is not None:
-        request = deepcopy(dict(execution_request))
-        capability_id = str(request.get("capability_id") or "")
+        raw_request = deepcopy(dict(execution_request))
+        invalid_field = _valid_execution_input(raw_request)
+        if invalid_field is not None:
+            return CoordinationDecision(
+                "BLOCK", f"INVALID_EXECUTION_REQUEST:{invalid_field}", None, None
+            )
+        capability_id = raw_request["capability_id"]
         errors = authorize_action(
             manifest,
             capability_id,
-            request.get("requested_permissions", []),
-            request.get("requested_effects", []),
-            request.get("estimated_costs", []),
+            raw_request["requested_permissions"],
+            raw_request["requested_effects"],
+            raw_request["estimated_costs"],
         )
         if errors:
             return CoordinationDecision("BLOCK", " | ".join(errors), None, None)
-        request.update(
-            {
-                "schema": "execution-request@1",
-                "mission_id": manifest.mission_id,
-                "mission_revision": manifest.revision,
-            }
-        )
+        request = {
+            "schema": "execution-request@1",
+            "request_id": _request_id(
+                manifest, capability_id, frontier_index, "execution"
+            ),
+            "mission_id": manifest.mission_id,
+            "mission_revision": manifest.revision,
+            **raw_request,
+        }
         reason = "AUTHORIZED_DISPATCH"
         if checkpoint_store is None:
             reason += ":SESSION_BOUNDED_NO_CHECKPOINT_STORE"
@@ -156,6 +238,36 @@ def coordinate_once(
         )
 
     return CoordinationDecision("NOOP", "NO_BOUNDED_NEXT_ACTION", None, None)
+
+
+def _validate_execution_receipt(
+    result: Mapping[str, Any],
+    manifest: MissionManifest,
+    request: Mapping[str, Any],
+) -> None:
+    if set(result) != _EXECUTION_RECEIPT_FIELDS:
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:fields")
+    if result.get("schema") != "execution-receipt@1":
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:schema")
+    if result.get("request_id") != request.get("request_id"):
+        raise CoordinationError("EXECUTION_RECEIPT_REQUEST_MISMATCH")
+    if result.get("mission_id") != manifest.mission_id:
+        raise CoordinationError("EXECUTION_RECEIPT_MISSION_MISMATCH")
+    if result.get("mission_revision") != manifest.revision:
+        raise CoordinationError("EXECUTION_RECEIPT_REVISION_MISMATCH")
+    if not _nonempty_string(result.get("adapter_ref")):
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:adapter_ref")
+    if result.get("status") not in _RESULT_STATUSES:
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:status")
+    if not _string_list(result.get("artifact_refs")):
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:artifact_refs")
+    if not isinstance(result.get("observed_effects"), list):
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:observed_effects")
+    external_ref = result.get("external_receipt_ref")
+    if external_ref is not None and not _nonempty_string(external_ref):
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:external_receipt_ref")
+    if not _string_list(result.get("coverage_limits")):
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:coverage_limits")
 
 
 def dispatch_once(
@@ -171,8 +283,33 @@ def dispatch_once(
         raise CoordinationError("MISSION_REVISION_MISMATCH")
     result = adapter.dispatch(deepcopy(decision.request))
     if not isinstance(result, dict):
-        raise CoordinationError("ADAPTER_RESULT_MUST_BE_OBJECT")
+        raise CoordinationError("INVALID_EXECUTION_RECEIPT:root")
+    _validate_execution_receipt(result, manifest, decision.request)
     return deepcopy(result)
+
+
+def _validate_capability_result(
+    result: Mapping[str, Any], decision: CoordinationDecision
+) -> None:
+    if set(result) - _CAPABILITY_RESULT_ALLOWED or not _CAPABILITY_RESULT_REQUIRED.issubset(result):
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:fields")
+    if result.get("schema") != "capability-result@1":
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:schema")
+    if result.get("request_id") != decision.request.get("request_id"):
+        raise CoordinationError("CAPABILITY_RESULT_REQUEST_MISMATCH")
+    if result.get("status") not in _RESULT_STATUSES:
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:status")
+    verdict = result.get("verdict")
+    if verdict is not None and not _nonempty_string(verdict):
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:verdict")
+    if not _string_list(result.get("artifact_refs")):
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:artifact_refs")
+    if not isinstance(result.get("observed_effects"), list):
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:observed_effects")
+    if not _string_list(result.get("coverage_limits")):
+        raise CoordinationError("INVALID_CAPABILITY_RESULT:coverage_limits")
+    if result.get("returned_control_point") != decision.return_point.to_dict():
+        raise CoordinationError("RETURN_POINT_MISMATCH")
 
 
 def apply_capability_result(
@@ -184,35 +321,25 @@ def apply_capability_result(
         raise CoordinationError("DECISION_NOT_CAPABILITY_REQUEST")
     if decision.return_point is None:
         raise CoordinationError("RETURN_POINT_REQUIRED")
-    if result.get("schema") != "capability-result@1":
-        raise CoordinationError("INVALID_CAPABILITY_RESULT_SCHEMA")
-    if result.get("request_id") != decision.request.get("request_id"):
-        raise CoordinationError("CAPABILITY_RESULT_REQUEST_MISMATCH")
-    status = result.get("status")
-    if status not in {"completed", "declined", "blocked", "failed"}:
-        raise CoordinationError("INVALID_CAPABILITY_RESULT_STATUS")
-    if result.get("returned_control_point") != decision.return_point.to_dict():
-        raise CoordinationError("RETURN_POINT_MISMATCH")
+    _validate_capability_result(result, decision)
 
     data = manifest.to_dict()
+    status = result["status"]
     verdict = result.get("verdict")
-    artifact_refs = result.get("artifact_refs")
-    if not isinstance(artifact_refs, list):
-        raise CoordinationError("ARTIFACT_REFS_MUST_BE_ARRAY")
-    if not isinstance(result.get("observed_effects"), list):
-        raise CoordinationError("OBSERVED_EFFECTS_MUST_BE_ARRAY")
-    if not isinstance(result.get("coverage_limits"), list):
-        raise CoordinationError("COVERAGE_LIMITS_MUST_BE_ARRAY")
+    artifact_refs = result["artifact_refs"]
     for artifact in artifact_refs:
         if artifact not in data["continuity"]["durable_artifacts"]:
-            data["continuity"]["durable_artifacts"].append(deepcopy(artifact))
+            data["continuity"]["durable_artifacts"].append(artifact)
 
     data["capabilities"]["invoked"].append(
         {
             "request_id": decision.request["request_id"],
             "capability_id": decision.request["capability_id"],
             "status": status,
-            "coverage_limits": deepcopy(result.get("coverage_limits", [])),
+            "verdict": verdict,
+            "artifact_refs": deepcopy(artifact_refs),
+            "observed_effects": deepcopy(result["observed_effects"]),
+            "coverage_limits": deepcopy(result["coverage_limits"]),
         }
     )
     data["state"]["next_action"] = decision.return_point.label
