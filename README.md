@@ -1,78 +1,107 @@
 # Practical Agency
 
-**Human-authorized mission control for durable agentic work.**
+Practical Agency is human-authorized mission control for carrying intent through
+durable, coordinated, resumable action.
 
-Practical Agency is a harness-agnostic [Agent Skills](https://agentskills.io/specification) package from [ZMS Labs](https://github.com/ZMS-Labs). It gives agents a **mission steward** role under the doctrine of **bounded delegated agency**, with the **mission manifest** as the durable artifact that binds intent, scope, and authorization across sessions and surfaces.
+Its sole public entry skill is `manifest`.
 
-| Concept | Name |
+Practical Agency does not give an artificial agent independent ends. It extends
+the operator's agency through bounded delegation: the operator owns the purpose,
+authority, protected state, acceptable costs, and right to interrupt; the system
+preserves those constraints while coordinating workflow, epistemic discipline,
+execution substrates, continuity, and independent proof.
+
+## Status
+
+Version 0.1 is a deterministic, standard-library mission kernel plus a portable
+Agent Skill. It is **not a daemon**, hosted service, scheduler, autonomous
+background actor, or source of independent machine goals.
+
+The repository proves deterministic mission custody, bounded authority, atomic
+checkpoints, dynamic capability discovery, exact return points, upstream-verified
+commission intake, crash recovery, and independent completion in isolated tests.
+There is **no production external execution adapter** in v0.1; live harness loading remains unverified until each packaging surface is exercised against its exact installed revision. comparative benefit over an ordinary capable agent is also unestablished until a controlled evaluation exists.
+
+## Conceptual stack
+
+| Layer | Owns |
 | --- | --- |
-| Project | Practical Agency |
-| Public skill | `manifest` |
-| Doctrine | Bounded delegated agency |
-| Role | Mission steward |
-| Artifact | Mission manifest |
+| Operator | Purpose, authority, protected state, cost, revocation |
+| Practical Agency | Mission custody, continuity, capability coordination, checkpoints |
+| Workflow methods | How implementation, debugging, and verification proceed |
+| Epistemic methods | What makes a claim, gate, observation, or decision trustworthy |
+| External substrates | Actual execution, scheduling, monitoring, and notification |
 
-Licensed under [GPL-3.0-or-later](LICENSE).
-
-## What this is
-
-Most agent stacks optimize *execution*: plans, tools, and verification loops. Practical Agency optimizes *delegation*: who may act, on what scope, for how long, with what stop rules, and what durable record survives when the chat ends.
-
-The steward does not replace the sovereign (the human). It holds continuity for a **mission** — a bounded slice of work with explicit authorization — and refuses to expand agency beyond what the manifest records.
+The project doctrine is **bounded delegated agency**. The acting role is the
+**mission steward**. The durable artifact is `mission-manifest@1`.
 
 ## Quick start
 
-1. Install the package for your harness (see [Installation](#installation)).
-2. When a task is more than a single reversible edit — multi-step, cross-session, consequential, or shared across agents — invoke **`manifest`** before expanding scope.
-3. Author or update a **mission manifest** at the mission's authoritative sink (usually the repo or project root). Treat the manifest as the contract of record; chat is not.
+1. Install or expose [`skills/manifest/SKILL.md`](skills/manifest/SKILL.md) to the
+   harness.
+2. Invoke `manifest` for a multi-step, consequential, resumable, or cross-agent
+   outcome. “Helix it” is accepted as compatibility intent for the same mission
+   driver.
+3. Create and validate a mission manifest from
+   [`examples/minimal-mission.json`](examples/minimal-mission.json).
+4. Save revision 1 before approval, then advance the mission through closed
+   events and atomic checkpoints.
+5. Complete material work only through the declared independent acceptor.
 
-## The `manifest` skill
+A routine, reversible, directly checkable one-step task should not mint a mission.
 
-The only published skill in this package is [`manifest`](skills/manifest/SKILL.md). It tells a mission steward how to:
+## Deterministic kernel
 
-- open, resume, or close a mission without silent scope creep;
-- bind human authorization to concrete allowed actions;
-- persist decisions and stop conditions in a mission manifest;
-- hand off or pause without losing defensibility.
+The Python package contains:
 
-## Mission manifest (artifact)
+- strict `mission-manifest@1` validation and canonical JSON;
+- authority checks for permissions, protected state, costs, escalation, and
+  revocation;
+- a closed mission state machine;
+- hash-bound atomic checkpoint storage and reconciliation findings;
+- dynamic capability discovery from immediate `SKILL.md` children, without a
+  copied member list;
+- one-action coordination and exact return-point restoration; and
+- an adapter boundary that accepts `watch-commission@1` only through its
+  originating verifier.
 
-A mission manifest is a small, version-controlled document (Markdown with optional YAML front matter) that answers:
+Run the full deterministic gate:
 
-- **Intent** — what outcome the sovereign wants, in their words where possible.
-- **Scope** — inclusions, exclusions, and environments touched.
-- **Authorization** — what the steward may do without re-asking; what requires fresh consent.
-- **Evidence** — where proof of progress and completion must land.
-- **Stop / hold** — conditions that pause or end the mission.
-
-See [`docs/mission-manifest.md`](docs/mission-manifest.md) for the v0 field guide and template.
-
-## Installation
-
-### Cursor
-
-Add this repository as a plugin source, or copy `skills/manifest/` into your project's skills directory. Reload the session so skill discovery runs.
-
-### Generic Agent Skills layout
-
-```text
-your-project/
-  .agents/skills/manifest/   # or your harness's skills root
-    SKILL.md
+```bash
+python -m unittest discover -s tests -p 'test_*.py' -v
+python -m compileall -q practical_agency tests
+python .github/scripts/check_contracts.py
+python .github/scripts/check_package.py
+python .github/scripts/check_public_content.py
 ```
 
-Point your harness at the skill root per its documentation.
+## Commission-watch boundary
 
-## Relationship to other ZMS packages
+Practical Agency does not become the observer. The upstream commission-watch
+discipline defines and proves the observation claim; an external mechanism does
+the actual between-session watching. Practical Agency may retain a validated
+commission, coordinate an authorized adapter, preserve receipts, and reopen a
+mission when a receipted crossing arrives. It cannot synthesize `PROVEN` or treat
+a shaped reference as authenticated evidence.
 
-- **[epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)** — what must be *true* before a claim bears load.
-- **Practical Agency** — what a steward is *allowed* to do while pursuing a mission, and what must be *recorded* so work survives compaction.
+## Repository map
 
-Use both when missions are consequential and claims must be defensible.
+```text
+skills/manifest/                  sole public skill
+practical_agency/                 deterministic mission kernel
+contracts/                        portable JSON Schema carriers
+roles/                            steward and independent acceptor contracts
+adapters/                         optional execution boundary documentation
+examples/                         valid mission examples
+tests/                            deterministic and end-to-end proof fixtures
+```
 
-## Developing
+## Relationship to epistemic-skills
 
-This repository is early. Issues and PRs welcome. Follow the [DCO](https://developercertificate.org/) sign-off on commits.
+[`epistemic-skills`](https://github.com/ZMS-Labs/epistemic-skills) governs what may
+honestly bear epistemic load. Practical Agency governs how an operator-authorized
+mission preserves continuity and advances through bounded action. Neither package
+absorbs the other's methods or verdicts.
 
 ## License
 

@@ -1,0 +1,12 @@
+{
+  "name": "practical-agency",
+  "description": "One explicit-entry mission-control skill for bounded delegated agency.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ZMS Labs"
+  },
+  "homepage": "https://github.com/ZMS-Labs/practical-agency",
+  "repository": "https://github.com/ZMS-Labs/practical-agency",
+  "license": "GPL-3.0-or-later",
+  "skills": "./skills/"
+}
