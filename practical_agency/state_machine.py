@@ -47,7 +47,10 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.VERIFYING.value,
     },
     "record_action": {MissionStatus.ACTIVE.value},
-    "record_observation": {MissionStatus.ACTIVE.value},
+    "record_observation": {
+        MissionStatus.ACTIVE.value,
+        MissionStatus.BLOCKED.value,
+    },
     "amend_authority": {
         MissionStatus.DRAFT.value,
         MissionStatus.ACTIVE.value,
@@ -62,6 +65,19 @@ def _required_string(data: Mapping[str, Any], key: str, code: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TransitionError(code)
     return value
+
+
+def _string_list(
+    data: Mapping[str, Any], key: str, code: str, *, non_empty: bool = False
+) -> list[str]:
+    value = data.get(key)
+    if (
+        not isinstance(value, list)
+        or (non_empty and not value)
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        raise TransitionError(code)
+    return list(value)
 
 
 def _operator_only(manifest: MissionManifest, event: MissionEvent) -> None:
@@ -83,6 +99,42 @@ def _material_workers(data: Mapping[str, Any]) -> set[str]:
             if isinstance(actor, str):
                 workers.add(actor)
     return workers
+
+
+def _require_independent_acceptor(
+    data: Mapping[str, Any], event: MissionEvent
+) -> None:
+    acceptor = data.get("integrity", {}).get("completion_acceptor")
+    if event.actor_ref != acceptor or event.actor_ref in _material_workers(data):
+        raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
+
+
+def _required_proof_refs(data: Mapping[str, Any]) -> list[str]:
+    return list(data["outcome"]["completion_proof"]) + list(
+        data["integrity"]["required_gates"]
+    )
+
+
+def _missing_proof_refs(data: Mapping[str, Any]) -> list[str]:
+    present = set(data["continuity"]["durable_artifacts"])
+    return [ref for ref in _required_proof_refs(data) if ref not in present]
+
+
+def _acceptance_evidence(payload: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    evidence_refs = _string_list(
+        payload, "evidence_refs", "ACCEPTANCE_EVIDENCE_REQUIRED", non_empty=True
+    )
+    coverage_limits = _string_list(
+        payload, "coverage_limits", "ACCEPTANCE_COVERAGE_LIMITS_REQUIRED"
+    )
+    return evidence_refs, coverage_limits
+
+
+def _reconciliation_subject(marker: object) -> str | None:
+    if not isinstance(marker, str) or not marker.startswith("RECONCILIATION:"):
+        return None
+    parts = marker.split(":", 2)
+    return parts[2] if len(parts) == 3 and parts[2] else None
 
 
 def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManifest:
@@ -134,15 +186,28 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         state["next_action"] = f"resolve blocker: {reason}"
 
     elif event.kind == "unblock":
-        state["status"] = MissionStatus.ACTIVE.value
         reason = payload.get("reason")
+        reconciliation_blockers = [
+            item
+            for item in state["blockers"]
+            if _reconciliation_subject(item) is not None
+        ]
+        if reconciliation_blockers and (
+            not isinstance(reason, str) or reason in reconciliation_blockers
+        ):
+            raise TransitionError("RECONCILIATION_OBSERVATION_REQUIRED")
         if isinstance(reason, str) and reason:
             state["blockers"] = [item for item in state["blockers"] if item != reason]
         else:
             state["blockers"] = []
-        state["next_action"] = (
-            state["current_frontier"][0] if state["current_frontier"] else None
-        )
+        if state["blockers"]:
+            state["status"] = MissionStatus.BLOCKED.value
+            state["next_action"] = f"resolve blocker: {state['blockers'][0]}"
+        else:
+            state["status"] = MissionStatus.ACTIVE.value
+            state["next_action"] = (
+                state["current_frontier"][0] if state["current_frontier"] else None
+            )
 
     elif event.kind == "begin_verification":
         if not isinstance(integrity.get("completion_acceptor"), str) or not integrity[
@@ -151,21 +216,22 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             raise TransitionError("COMPLETION_ACCEPTOR_REQUIRED")
         if state["blockers"]:
             raise TransitionError("UNRESOLVED_BLOCKERS")
+        if integrity["unresolved_verdicts"]:
+            raise TransitionError("UNRESOLVED_VERDICTS")
+        missing = _missing_proof_refs(data)
+        if missing:
+            raise TransitionError("PROOF_BUNDLE_NOT_READY:" + ",".join(missing))
         state["status"] = MissionStatus.VERIFYING.value
         state["next_action"] = "independent acceptance"
 
     elif event.kind == "accept":
-        acceptor = integrity.get("completion_acceptor")
-        if event.actor_ref != acceptor or event.actor_ref in _material_workers(data):
-            raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
+        _require_independent_acceptor(data, event)
         if payload.get("verdict") != "PASS":
             raise TransitionError("PASS_VERDICT_REQUIRED")
+        evidence_refs, coverage_limits = _acceptance_evidence(payload)
         if integrity["unresolved_verdicts"]:
             raise TransitionError("UNRESOLVED_VERDICTS")
-        present = set(continuity["durable_artifacts"])
-        missing = [
-            ref for ref in data["outcome"]["completion_proof"] if ref not in present
-        ]
+        missing = _missing_proof_refs(data)
         if missing:
             raise TransitionError("COMPLETION_PROOF_MISSING:" + ",".join(missing))
         state["status"] = MissionStatus.COMPLETED.value
@@ -176,16 +242,18 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 "kind": "independent-acceptance",
                 "actor_ref": event.actor_ref,
                 "verdict": "PASS",
+                "evidence_refs": evidence_refs,
+                "coverage_limits": coverage_limits,
             }
         )
 
     elif event.kind == "reject":
-        if event.actor_ref != integrity.get("completion_acceptor"):
-            raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
+        _require_independent_acceptor(data, event)
         verdict = payload.get("verdict")
         if verdict not in {"FAIL", "INCONCLUSIVE"}:
             raise TransitionError("REJECTION_VERDICT_REQUIRED")
-        reason = str(payload.get("reason") or "unspecified")
+        reason = _required_string(payload, "reason", "REJECTION_REASON_REQUIRED")
+        evidence_refs, coverage_limits = _acceptance_evidence(payload)
         unresolved = f"{verdict}:{reason}"
         _append_unique(integrity["unresolved_verdicts"], unresolved)
         _append_unique(state["blockers"], unresolved)
@@ -195,6 +263,16 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             else MissionStatus.ACTIVE.value
         )
         state["next_action"] = f"address verdict: {unresolved}"
+        continuity["decisions"].append(
+            {
+                "kind": "independent-rejection",
+                "actor_ref": event.actor_ref,
+                "verdict": verdict,
+                "reason": reason,
+                "evidence_refs": evidence_refs,
+                "coverage_limits": coverage_limits,
+            }
+        )
 
     elif event.kind == "revoke":
         _operator_only(manifest, event)
@@ -226,20 +304,56 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         artifact_ref = _required_string(
             payload, "artifact_ref", "OBSERVATION_ARTIFACT_REQUIRED"
         )
-        _append_unique(continuity["durable_artifacts"], artifact_ref)
         fact = payload.get("fact")
-        if isinstance(fact, Mapping):
-            subject_ref = fact.get("subject_ref")
-            if isinstance(subject_ref, str) and subject_ref:
-                data["truth"]["verified_facts"] = [
-                    item
-                    for item in data["truth"]["verified_facts"]
-                    if not (
-                        isinstance(item, Mapping)
-                        and item.get("subject_ref") == subject_ref
-                    )
-                ]
-                data["truth"]["verified_facts"].append(deepcopy(dict(fact)))
+        if not isinstance(fact, Mapping) or set(fact) != {"subject_ref", "value"}:
+            raise TransitionError("OBSERVATION_FACT_REQUIRED")
+        subject_ref = fact.get("subject_ref")
+        if not isinstance(subject_ref, str) or not subject_ref.strip():
+            raise TransitionError("OBSERVATION_SUBJECT_REQUIRED")
+        _append_unique(continuity["durable_artifacts"], artifact_ref)
+        data["truth"]["verified_facts"] = [
+            item
+            for item in data["truth"]["verified_facts"]
+            if not (
+                isinstance(item, Mapping)
+                and item.get("subject_ref") == subject_ref
+            )
+        ]
+        data["truth"]["verified_facts"].append(deepcopy(dict(fact)))
+        for field_name in ("contradictions", "unknowns"):
+            data["truth"][field_name] = [
+                item
+                for item in data["truth"][field_name]
+                if not (
+                    isinstance(item, Mapping)
+                    and item.get("subject_ref") == subject_ref
+                )
+            ]
+        state["blockers"] = [
+            marker
+            for marker in state["blockers"]
+            if _reconciliation_subject(marker) != subject_ref
+        ]
+        integrity["unresolved_verdicts"] = [
+            marker
+            for marker in integrity["unresolved_verdicts"]
+            if _reconciliation_subject(marker) != subject_ref
+        ]
+        if current == MissionStatus.BLOCKED.value:
+            if state["blockers"] or integrity["unresolved_verdicts"]:
+                state["status"] = MissionStatus.BLOCKED.value
+                state["next_action"] = (
+                    f"resolve blocker: {state['blockers'][0]}"
+                    if state["blockers"]
+                    else "resolve unresolved verdict"
+                )
+            else:
+                state["status"] = MissionStatus.ACTIVE.value
+                state["next_action"] = (
+                    state["current_frontier"][0]
+                    if state["current_frontier"]
+                    else "resume mission"
+                )
 
     elif event.kind == "amend_authority":
         _operator_only(manifest, event)
