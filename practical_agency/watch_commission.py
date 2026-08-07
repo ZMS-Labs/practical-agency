@@ -159,11 +159,19 @@ def handle_crossing_event(
     if not isinstance(event_ref, str) or not event_ref:
         raise CommissionIntegrationError("EVENT_RECEIPT_REQUIRED")
     retained = manifest.continuity.get("watch_commissions", [])
-    if not any(
-        isinstance(record, Mapping) and record.get("commission_id") == commission_id
-        for record in retained
-    ):
+    matching = next(
+        (
+            record
+            for record in retained
+            if isinstance(record, Mapping)
+            and record.get("commission_id") == commission_id
+        ),
+        None,
+    )
+    if matching is None:
         raise CommissionIntegrationError("COMMISSION_NOT_RETAINED")
+    if matching.get("state") not in {"PROVEN", "SUSPECT"}:
+        raise CommissionIntegrationError("COMMISSION_NOT_OPERATING")
 
     data = manifest.to_dict()
     data["state"]["status"] = MissionStatus.ACTIVE.value
