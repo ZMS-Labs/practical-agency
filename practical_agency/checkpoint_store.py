@@ -132,7 +132,10 @@ class FileCheckpointStore:
         return receipt
 
     def load(self, receipt: CheckpointReceipt) -> MissionManifest:
-        path = Path(receipt.path)
+        path = Path(receipt.path).resolve()
+        expected_path = self._data_path(receipt.mission_id, receipt.revision).resolve()
+        if path != expected_path:
+            raise CheckpointError("CHECKPOINT_PATH_MISMATCH")
         try:
             data = path.read_bytes()
         except OSError as error:
@@ -167,7 +170,7 @@ class FileCheckpointStore:
                 candidates.append((int(match.group("revision")), path))
         if not candidates:
             return None
-        _, receipt_path = max(candidates, key=lambda item: item[0])
+        candidate_revision, receipt_path = max(candidates, key=lambda item: item[0])
         try:
             payload = json.loads(receipt_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -175,6 +178,8 @@ class FileCheckpointStore:
         if not isinstance(payload, dict):
             raise CheckpointError("INVALID_CHECKPOINT_RECEIPT: root must be object")
         receipt = CheckpointReceipt.from_dict(payload)
+        if receipt.mission_id != mission_id or receipt.revision != candidate_revision:
+            raise CheckpointError("CHECKPOINT_LATEST_IDENTITY_MISMATCH")
         return self.load(receipt), receipt
 
 

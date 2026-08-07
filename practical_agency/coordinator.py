@@ -184,15 +184,25 @@ def apply_capability_result(
         raise CoordinationError("DECISION_NOT_CAPABILITY_REQUEST")
     if decision.return_point is None:
         raise CoordinationError("RETURN_POINT_REQUIRED")
+    if result.get("schema") != "capability-result@1":
+        raise CoordinationError("INVALID_CAPABILITY_RESULT_SCHEMA")
+    if result.get("request_id") != decision.request.get("request_id"):
+        raise CoordinationError("CAPABILITY_RESULT_REQUEST_MISMATCH")
+    status = result.get("status")
+    if status not in {"completed", "declined", "blocked", "failed"}:
+        raise CoordinationError("INVALID_CAPABILITY_RESULT_STATUS")
     if result.get("returned_control_point") != decision.return_point.to_dict():
         raise CoordinationError("RETURN_POINT_MISMATCH")
 
     data = manifest.to_dict()
-    status = str(result.get("status") or "failed")
     verdict = result.get("verdict")
-    artifact_refs = result.get("artifact_refs", [])
+    artifact_refs = result.get("artifact_refs")
     if not isinstance(artifact_refs, list):
         raise CoordinationError("ARTIFACT_REFS_MUST_BE_ARRAY")
+    if not isinstance(result.get("observed_effects"), list):
+        raise CoordinationError("OBSERVED_EFFECTS_MUST_BE_ARRAY")
+    if not isinstance(result.get("coverage_limits"), list):
+        raise CoordinationError("COVERAGE_LIMITS_MUST_BE_ARRAY")
     for artifact in artifact_refs:
         if artifact not in data["continuity"]["durable_artifacts"]:
             data["continuity"]["durable_artifacts"].append(deepcopy(artifact))

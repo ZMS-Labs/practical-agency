@@ -1,9 +1,12 @@
 """Fail-closed semantic validation for mission-manifest@1."""
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from practical_agency.manifest_model import MissionStatus
+
+MISSION_ID_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 TOP_LEVEL = {
     "schema",
@@ -133,8 +136,13 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
 
     if payload.get("schema") != "mission-manifest@1":
         errors.append("INVALID_SCHEMA: schema must equal mission-manifest@1")
-    if not _nonempty_string(payload.get("mission_id")):
+    mission_id = payload.get("mission_id")
+    if not _nonempty_string(mission_id):
         errors.append("MISSION_ID_REQUIRED: mission_id must be non-empty")
+    elif MISSION_ID_PATTERN.fullmatch(mission_id) is None:
+        errors.append(
+            "INVALID_MISSION_ID: mission_id must use storage-safe ASCII letters, digits, dot, underscore, or hyphen"
+        )
 
     revision = payload.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
