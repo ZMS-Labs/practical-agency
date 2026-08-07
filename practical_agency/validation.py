@@ -258,12 +258,21 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
         errors.append(
             "INVALID_OPTIONAL_STRING: continuity.prior_checkpoint must be null or a string"
         )
+    if not _all_nonempty_strings(continuity.get("durable_artifacts")):
+        errors.append(
+            "INVALID_STRING_LIST: continuity.durable_artifacts must contain only non-empty strings"
+        )
     for field in ("decisions", "external_handoffs", "watch_commissions"):
         if not _all_mappings(continuity.get(field)):
             errors.append(
                 f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
             )
 
+    for field in ("required_gates", "unresolved_verdicts"):
+        if not _all_nonempty_strings(integrity.get(field)):
+            errors.append(
+                f"INVALID_STRING_LIST: integrity.{field} must contain only non-empty strings"
+            )
     if not _optional_string(integrity.get("completion_acceptor")):
         errors.append(
             "INVALID_OPTIONAL_STRING: integrity.completion_acceptor must be null or a string"

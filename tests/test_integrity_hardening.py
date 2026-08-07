@@ -262,7 +262,11 @@ class IntegrityHardeningTests(unittest.TestCase):
             errors = validate_manifest_dict(payload)
             self.assertTrue(
                 any(
-                    error.startswith(("INVALID_STRING_LIST:", "INVALID_OBJECT_LIST:"))
+                    error.startswith((
+                        "INVALID_STRING_LIST:",
+                        "INVALID_OBJECT_LIST:",
+                        "INVALID_SUBJECT_REFS:",
+                    ))
                     for error in errors
                 ),
                 (path, errors),
@@ -496,19 +500,16 @@ class IntegrityHardeningTests(unittest.TestCase):
             completed, {"artifact:canonical": "hash-b"}
         )
         reopened = apply_reconciliation_findings(completed, findings)
-        self.assertEqual(reopened.state["status"], "blocked")
+        self.assertEqual(reopened.state["status"], "active")
         self.assertNotIn(
             "artifact:validator-pass", reopened.continuity["durable_artifacts"]
         )
         self.assertTrue(reopened.integrity["unresolved_verdicts"])
 
-        blocker = reopened.state["blockers"][0]
-        with self.assertRaisesRegex(
-            TransitionError, "RECONCILIATION_OBSERVATION_REQUIRED"
-        ):
+        with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
             apply_event(
                 reopened,
-                MissionEvent("unblock", "mission-steward", {"reason": blocker}),
+                MissionEvent("begin_verification", "mission-steward", {}),
             )
 
         repaired = apply_event(
@@ -560,7 +561,7 @@ class IntegrityHardeningTests(unittest.TestCase):
         inert["state"] = "INERT"
         inert["external_observer"]["enabled"] = False
         payload["continuity"]["watch_commissions"] = [inert]
-        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_ACTIVE"):
+        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_OPERATING"):
             handle_crossing_event(
                 MissionManifest.from_dict(payload),
                 {

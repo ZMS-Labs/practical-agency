@@ -294,7 +294,10 @@
         },
         "durable_artifacts": {
           "type": "array",
-          "items": {}
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "decisions": {
           "type": "array",
@@ -334,11 +337,17 @@
         },
         "required_gates": {
           "type": "array",
-          "items": {}
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "unresolved_verdicts": {
           "type": "array",
-          "items": {}
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "completion_acceptor": {
           "type": [
