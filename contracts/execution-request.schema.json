@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schema",
+    "request_id",
     "mission_id",
     "mission_revision",
     "capability_id",
@@ -17,6 +18,10 @@
   "properties": {
     "schema": {
       "const": "execution-request@1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
     },
     "mission_id": {
       "type": "string",
