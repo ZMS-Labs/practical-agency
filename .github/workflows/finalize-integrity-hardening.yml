@@ -5,6 +5,7 @@ name: finalize-integrity-hardening
     branches:
       - chatgpt/implement-practical-agency-v0.1
     paths:
+      - ".github/scripts/finalize_integrity_hardening.py"
       - ".github/workflows/finalize-integrity-hardening.yml"
 
 permissions:
@@ -49,6 +50,6 @@ jobs:
           git config user.email "89846440+SternOne@users.noreply.github.com"
           git add -A
           git commit -m "fix: close final mission integrity mismatches" \
-            -m "Align semantic and structural string-list boundaries, normalize inactive commission refusal naming, and retain the complete 89-test integrity suite." \
+            -m "Align semantic and structural string-list boundaries, normalize inactive commission refusal naming, retain the complete 89-test integrity suite, and remove all temporary migration machinery." \
             -m "Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
           git push origin HEAD:chatgpt/implement-practical-agency-v0.1
