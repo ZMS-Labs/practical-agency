@@ -149,7 +149,15 @@ class CoordinatorTests(unittest.TestCase):
         updated = apply_capability_result(
             self.active(),
             decision,
-            {"status": "completed", "returned_control_point": decision.return_point.to_dict(), "artifact_refs": ["artifact:x"]},
+            {
+                "schema": "capability-result@1",
+                "request_id": decision.request["request_id"],
+                "status": "completed",
+                "artifact_refs": ["artifact:x"],
+                "observed_effects": [],
+                "returned_control_point": decision.return_point.to_dict(),
+                "coverage_limits": [],
+            },
         )
         self.assertEqual(updated.state["next_action"], decision.return_point.label)
         self.assertIn("artifact:x", updated.continuity["durable_artifacts"])
@@ -162,14 +170,56 @@ class CoordinatorTests(unittest.TestCase):
             self.active(),
             decision,
             {
+                "schema": "capability-result@1",
+                "request_id": decision.request["request_id"],
                 "status": "completed",
                 "verdict": "NO-GO",
-                "returned_control_point": decision.return_point.to_dict(),
                 "artifact_refs": [],
+                "observed_effects": [],
+                "returned_control_point": decision.return_point.to_dict(),
+                "coverage_limits": [],
             },
         )
         self.assertEqual(updated.state["status"], "blocked")
         self.assertIn("NO-GO", updated.integrity["unresolved_verdicts"])
+
+    def test_unknown_capability_result_status_is_rejected(self) -> None:
+        decision = coordinate_once(
+            self.active(), unresolved_condition="Gate", selected_capability=capability(), checkpoint_store=object()
+        )
+        with self.assertRaisesRegex(CoordinationError, "INVALID_CAPABILITY_RESULT_STATUS"):
+            apply_capability_result(
+                self.active(),
+                decision,
+                {
+                    "schema": "capability-result@1",
+                    "request_id": decision.request["request_id"],
+                    "status": "banana",
+                    "artifact_refs": [],
+                    "observed_effects": [],
+                    "returned_control_point": decision.return_point.to_dict(),
+                    "coverage_limits": [],
+                },
+            )
+
+    def test_capability_result_request_id_must_match(self) -> None:
+        decision = coordinate_once(
+            self.active(), unresolved_condition="Gate", selected_capability=capability(), checkpoint_store=object()
+        )
+        with self.assertRaisesRegex(CoordinationError, "CAPABILITY_RESULT_REQUEST_MISMATCH"):
+            apply_capability_result(
+                self.active(),
+                decision,
+                {
+                    "schema": "capability-result@1",
+                    "request_id": "other-request",
+                    "status": "completed",
+                    "artifact_refs": [],
+                    "observed_effects": [],
+                    "returned_control_point": decision.return_point.to_dict(),
+                    "coverage_limits": [],
+                },
+            )
 
     def test_wrong_return_point_is_rejected(self) -> None:
         decision = coordinate_once(
@@ -179,7 +229,15 @@ class CoordinatorTests(unittest.TestCase):
             apply_capability_result(
                 self.active(),
                 decision,
-                {"status": "completed", "returned_control_point": {"mission_id": "other"}, "artifact_refs": []},
+                {
+                    "schema": "capability-result@1",
+                    "request_id": decision.request["request_id"],
+                    "status": "completed",
+                    "artifact_refs": [],
+                    "observed_effects": [],
+                    "returned_control_point": {"mission_id": "other"},
+                    "coverage_limits": [],
+                },
             )
 
     def test_helix_and_manifest_phrases_normalize_to_same_intent(self) -> None:

@@ -40,6 +40,16 @@ class MissionManifestTests(unittest.TestCase):
             payload["revision"] = value
             self.assertTrue(any(x.startswith("INVALID_REVISION:") for x in validate_manifest_dict(payload)))
 
+    def test_mission_id_must_be_storage_safe(self) -> None:
+        for value in ("../escape", "a/b", "/tmp/absolute", "x\\y", "."):
+            payload = clone_payload()
+            payload["mission_id"] = value
+            errors = validate_manifest_dict(payload)
+            self.assertTrue(
+                any(error.startswith("INVALID_MISSION_ID:") for error in errors),
+                (value, errors),
+            )
+
     def test_status_enum_is_closed(self) -> None:
         payload = clone_payload()
         payload["state"]["status"] = "mostly-done"

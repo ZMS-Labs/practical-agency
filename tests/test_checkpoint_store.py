@@ -70,6 +70,35 @@ class CheckpointStoreTests(unittest.TestCase):
             self.assertEqual(manifest.revision, 2)
             self.assertEqual(receipt.sha256, second.sha256)
 
+    def test_load_rejects_receipt_path_outside_store(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = FileCheckpointStore(root / "store")
+            manifest = self.manifest()
+            data = manifest.to_canonical_json().encode("utf-8")
+            outside = root / "outside.json"
+            outside.write_bytes(data)
+            receipt = CheckpointReceipt(
+                mission_id=manifest.mission_id,
+                revision=manifest.revision,
+                path=str(outside),
+                sha256=hashlib.sha256(data).hexdigest(),
+                created_at="2026-08-07T12:00:00Z",
+            )
+            with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_PATH_MISMATCH"):
+                store.load(receipt)
+
+    def test_load_latest_rejects_filename_receipt_revision_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = FileCheckpointStore(root)
+            first = store.save(self.manifest(1))
+            store.save(self.manifest(2))
+            forged = root / "mission-001.r99999999.receipt.json"
+            forged.write_text(json.dumps(first.to_dict()) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_LATEST_IDENTITY_MISMATCH"):
+                store.load_latest("mission-001")
+
     def test_invalid_highest_revision_is_not_silently_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = FileCheckpointStore(Path(temp))

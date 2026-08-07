@@ -149,6 +149,9 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         payload["state"]["status"] = "completed"
         payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        payload["continuity"]["watch_commissions"] = [
+            {"commission_id": "wc-1", "state": "PROVEN"}
+        ]
         manifest = MissionManifest.from_dict(payload)
         reopened = handle_crossing_event(
             manifest,
@@ -156,6 +159,19 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         )
         self.assertEqual(reopened.state["status"], "active")
         self.assertIn("triage crossing for commission wc-1", reopened.state["current_frontier"])
+
+    def test_crossing_requires_a_retained_commission(self) -> None:
+        payload = clone_payload()
+        payload["revision"] = 5
+        payload["state"]["status"] = "completed"
+        payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        manifest = MissionManifest.from_dict(payload)
+        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_RETAINED"):
+            handle_crossing_event(
+                manifest,
+                {"commission_id": "missing", "event_ref": "external-event://1"},
+            )
 
     def test_revocation_disables_retained_mechanisms(self) -> None:
         payload = clone_payload()
