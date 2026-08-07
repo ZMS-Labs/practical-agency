@@ -23,7 +23,7 @@ points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
 independent completion, and pinned commission-contract interoperability in
 isolated tests.
 
-There is **no production external execution adapter** in v0.1. Live harness
+There is **no production external execution adapter** in v0.1; live harness
 loading remains unverified until each packaging surface is exercised against its
 exact installed revision. Comparative benefit over an ordinary capable agent is
 also unestablished until a controlled evaluation exists.
