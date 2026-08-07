@@ -1,4 +1,8 @@
 __pycache__/
-*.pyc
-*.pyo
-.DS_Store
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.coverage
+.missions/checkpoints/

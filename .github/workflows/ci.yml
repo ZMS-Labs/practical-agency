@@ -1,0 +1,45 @@
+name: ci
+
+"on":
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out tested revision without stored credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch pinned commission-watch contract outside product tree
+        run: |
+          upstream="$RUNNER_TEMP/epistemic-skills"
+          git init "$upstream"
+          git -C "$upstream" remote add origin https://github.com/ZMS-Labs/epistemic-skills.git
+          git -C "$upstream" fetch --depth=1 origin 6e26484a9cae7629b233734fe5121137ba9168a8
+          git -C "$upstream" checkout --detach 6e26484a9cae7629b233734fe5121137ba9168a8
+          test "$(git -C "$upstream" rev-parse HEAD)" = "6e26484a9cae7629b233734fe5121137ba9168a8"
+          echo "PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT=$upstream/plugins/epistemic-skills/contracts/watch-commission" >> "$GITHUB_ENV"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Unit, end-to-end, and pinned upstream interoperability tests
+        env:
+          PRACTICAL_AGENCY_REQUIRE_UPSTREAM_WATCH: "1"
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile Python
+        run: python -m compileall -q practical_agency tests .github/scripts
+      - name: Contract and JSON checks
+        run: python .github/scripts/check_contracts.py
+      - name: Package surface and description budget
+        run: python .github/scripts/check_package.py
+      - name: Public-content boundary
+        run: python .github/scripts/check_public_content.py
