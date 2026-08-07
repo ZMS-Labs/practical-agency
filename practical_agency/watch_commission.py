@@ -55,31 +55,77 @@ def accept_external_commission(
     return ExternalCommissionResult("VERIFIED_EXTERNAL_CONTRACT", copied, ())
 
 
+def _verified_record(
+    commission: Mapping[str, Any] | ExternalCommissionResult,
+    verifier: Verifier | None,
+) -> ExternalCommissionResult:
+    if isinstance(commission, ExternalCommissionResult):
+        if commission.status != "VERIFIED_EXTERNAL_CONTRACT":
+            return commission
+        return accept_external_commission(commission.record, verifier)
+    return accept_external_commission(commission, verifier)
+
+
+def _required_receipt_string(
+    receipt: Mapping[str, Any], key: str, code: str
+) -> str:
+    value = receipt.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise CommissionIntegrationError(code)
+    return value
+
+
 def prepare_disabled(
-    commission: Mapping[str, Any], adapter: WatchExecutionAdapter
-) -> dict[str, Any]:
-    candidate = deepcopy(dict(commission))
-    receipt = deepcopy(dict(adapter.prepare_disabled(candidate)))
-    mechanism_ref = receipt.get("mechanism_ref")
-    if not isinstance(mechanism_ref, str) or not mechanism_ref:
-        raise CommissionIntegrationError("ADAPTER_MECHANISM_REF_REQUIRED")
-    persistence_ref = receipt.get("persistence_receipt_ref")
-    if not isinstance(persistence_ref, str) or not persistence_ref:
-        raise CommissionIntegrationError("PERSISTENCE_RECEIPT_REQUIRED")
+    commission: Mapping[str, Any],
+    adapter: WatchExecutionAdapter,
+    verifier: Verifier | None,
+) -> ExternalCommissionResult:
+    verified = accept_external_commission(commission, verifier)
+    if verified.status != "VERIFIED_EXTERNAL_CONTRACT":
+        return verified
+    if verified.record.get("state") != "DECLARED":
+        return ExternalCommissionResult(
+            "REJECTED_EXTERNAL_CONTRACT",
+            verified.record,
+            ("COMMISSION_MUST_BE_DECLARED_BEFORE_PREPARATION",),
+        )
+
+    candidate = deepcopy(verified.record)
+    raw_receipt = adapter.prepare_disabled(deepcopy(candidate))
+    if not isinstance(raw_receipt, Mapping):
+        raise CommissionIntegrationError("PREPARATION_RECEIPT_MUST_BE_OBJECT")
+    receipt = deepcopy(dict(raw_receipt))
+    mechanism_ref = _required_receipt_string(
+        receipt, "mechanism_ref", "ADAPTER_MECHANISM_REF_REQUIRED"
+    )
+    persistence_ref = _required_receipt_string(
+        receipt, "persistence_receipt_ref", "PERSISTENCE_RECEIPT_REQUIRED"
+    )
+    substrate_kind = _required_receipt_string(
+        receipt, "substrate_kind", "SUBSTRATE_KIND_REQUIRED"
+    )
+    substrate = _required_receipt_string(
+        receipt, "substrate", "SUBSTRATE_REQUIRED"
+    )
     block_evidence = receipt.get("block_evidence")
     if not isinstance(block_evidence, Mapping) or not all(
         isinstance(block_evidence.get(key), str) and block_evidence.get(key)
         for key in ("detail", "observed_at", "receipt_ref")
     ):
         raise CommissionIntegrationError("BLOCK_EVIDENCE_REQUIRED")
+    coverage_limits = receipt.get("coverage_limits")
+    if not isinstance(coverage_limits, list) or any(
+        not isinstance(item, str) or not item.strip() for item in coverage_limits
+    ):
+        raise CommissionIntegrationError("COVERAGE_LIMITS_REQUIRED")
 
     observer = candidate.setdefault("external_observer", {})
     if not isinstance(observer, dict):
         raise CommissionIntegrationError("EXTERNAL_OBSERVER_MUST_BE_OBJECT")
     observer.update(
         {
-            "substrate_kind": receipt.get("substrate_kind"),
-            "substrate": receipt.get("substrate"),
+            "substrate_kind": substrate_kind,
+            "substrate": substrate,
             "mechanism_ref": mechanism_ref,
             "persistence_receipt_ref": persistence_ref,
             "persistent_outside_session": True,
@@ -89,28 +135,42 @@ def prepare_disabled(
     candidate["state"] = "BLOCKED"
     candidate["block_reason"] = "KILL_SWITCH_UNPROVEN"
     candidate["block_evidence"] = deepcopy(dict(block_evidence))
-    candidate["coverage_limits"] = deepcopy(receipt.get("coverage_limits", []))
-    return candidate
+    candidate["coverage_limits"] = deepcopy(coverage_limits)
+    return accept_external_commission(candidate, verifier)
 
 
 def exercise_kill_switch(
-    prepared: Mapping[str, Any],
+    prepared: Mapping[str, Any] | ExternalCommissionResult,
     adapter: WatchExecutionAdapter,
     verifier: Verifier | None,
 ) -> ExternalCommissionResult:
-    candidate = deepcopy(dict(prepared))
+    verified = _verified_record(prepared, verifier)
+    if verified.status != "VERIFIED_EXTERNAL_CONTRACT":
+        return verified
+    candidate = deepcopy(verified.record)
+    if candidate.get("state") != "BLOCKED" or candidate.get("block_reason") != "KILL_SWITCH_UNPROVEN":
+        return ExternalCommissionResult(
+            "REJECTED_EXTERNAL_CONTRACT",
+            candidate,
+            ("KILL_SWITCH_EXERCISE_REQUIRES_PREPARED_BLOCKED_COMMISSION",),
+        )
     observer = candidate.get("external_observer")
     if not isinstance(observer, Mapping):
         raise CommissionIntegrationError("EXTERNAL_OBSERVER_REQUIRED")
     mechanism_ref = observer.get("mechanism_ref")
     if not isinstance(mechanism_ref, str) or not mechanism_ref:
         raise CommissionIntegrationError("MECHANISM_REF_REQUIRED")
-    receipt = deepcopy(dict(adapter.exercise_kill_switch(mechanism_ref)))
+    raw_receipt = adapter.exercise_kill_switch(mechanism_ref)
+    if not isinstance(raw_receipt, Mapping):
+        raise CommissionIntegrationError("KILL_SWITCH_RECEIPT_MUST_BE_OBJECT")
+    receipt = deepcopy(dict(raw_receipt))
+    if receipt.get("mechanism_ref") not in {None, mechanism_ref}:
+        raise CommissionIntegrationError("KILL_SWITCH_MECHANISM_MISMATCH")
     if receipt.get("observed_stopped") is not True:
         raise CommissionIntegrationError("KILL_SWITCH_NOT_OBSERVED_STOPPED")
-    exercise_ref = receipt.get("exercise_receipt_ref")
-    if not isinstance(exercise_ref, str) or not exercise_ref:
-        raise CommissionIntegrationError("KILL_SWITCH_RECEIPT_REQUIRED")
+    exercise_ref = _required_receipt_string(
+        receipt, "exercise_receipt_ref", "KILL_SWITCH_RECEIPT_REQUIRED"
+    )
 
     kill_switch = candidate.setdefault("kill_switch", {})
     if not isinstance(kill_switch, dict):
@@ -152,12 +212,19 @@ def retain_commission(
 def handle_crossing_event(
     manifest: MissionManifest, event: Mapping[str, Any]
 ) -> MissionManifest:
-    commission_id = event.get("commission_id")
-    event_ref = event.get("event_ref")
-    if not isinstance(commission_id, str) or not commission_id:
-        raise CommissionIntegrationError("COMMISSION_ID_REQUIRED")
-    if not isinstance(event_ref, str) or not event_ref:
-        raise CommissionIntegrationError("EVENT_RECEIPT_REQUIRED")
+    if manifest.authority.get("revoked") is True:
+        raise CommissionIntegrationError("AUTHORITY_REVOKED")
+    if manifest.state.get("status") == MissionStatus.CANCELLED.value:
+        raise CommissionIntegrationError("MISSION_CANCELLED")
+    if set(event) != {"commission_id", "event_ref", "observed_at"}:
+        raise CommissionIntegrationError("INVALID_CROSSING_EVENT")
+    commission_id = _required_receipt_string(
+        event, "commission_id", "COMMISSION_ID_REQUIRED"
+    )
+    event_ref = _required_receipt_string(event, "event_ref", "EVENT_RECEIPT_REQUIRED")
+    observed_at = _required_receipt_string(
+        event, "observed_at", "EVENT_OBSERVED_AT_REQUIRED"
+    )
     retained = manifest.continuity.get("watch_commissions", [])
     matching = next(
         (
@@ -170,7 +237,12 @@ def handle_crossing_event(
     )
     if matching is None:
         raise CommissionIntegrationError("COMMISSION_NOT_RETAINED")
-    if matching.get("state") not in {"PROVEN", "SUSPECT"}:
+    observer = matching.get("external_observer")
+    if (
+        matching.get("state") != "PROVEN"
+        or not isinstance(observer, Mapping)
+        or observer.get("enabled") is not True
+    ):
         raise CommissionIntegrationError("COMMISSION_NOT_OPERATING")
 
     data = manifest.to_dict()
@@ -184,7 +256,7 @@ def handle_crossing_event(
             "kind": "watch-crossing",
             "commission_id": commission_id,
             "event_ref": event_ref,
-            "observed_at": event.get("observed_at"),
+            "observed_at": observed_at,
             "hands_to": ["triage", "decision-ledger"],
         }
     )
@@ -194,18 +266,62 @@ def handle_crossing_event(
 
 def disable_commissions_for_revocation(
     manifest: MissionManifest, adapter: WatchExecutionAdapter
-) -> list[dict[str, Any]]:
+) -> tuple[MissionManifest, list[dict[str, Any]]]:
+    if manifest.authority.get("revoked") is not True:
+        raise CommissionIntegrationError("AUTHORITY_NOT_REVOKED")
+
+    data = manifest.to_dict()
     receipts: list[dict[str, Any]] = []
-    for record in manifest.continuity.get("watch_commissions", []):
+    retained = data["continuity"]["watch_commissions"]
+    for index, record in enumerate(retained):
         if not isinstance(record, Mapping):
             continue
-        observer = record.get("external_observer")
-        if not isinstance(observer, Mapping):
+        updated = deepcopy(dict(record))
+        observer = updated.get("external_observer")
+        if not isinstance(observer, dict):
             continue
         mechanism_ref = observer.get("mechanism_ref")
-        if isinstance(mechanism_ref, str) and mechanism_ref:
-            result = adapter.disable(mechanism_ref)
-            if not isinstance(result, Mapping):
-                raise CommissionIntegrationError("DISABLE_RECEIPT_MUST_BE_OBJECT")
-            receipts.append(deepcopy(dict(result)))
-    return receipts
+        if not isinstance(mechanism_ref, str) or not mechanism_ref:
+            continue
+        raw_result = adapter.disable(mechanism_ref)
+        if not isinstance(raw_result, Mapping):
+            raise CommissionIntegrationError("DISABLE_RECEIPT_MUST_BE_OBJECT")
+        result = deepcopy(dict(raw_result))
+        if set(result) != {
+            "mechanism_ref",
+            "disabled",
+            "observed_at",
+            "disable_receipt_ref",
+        }:
+            raise CommissionIntegrationError("INVALID_DISABLE_RECEIPT")
+        if result.get("mechanism_ref") != mechanism_ref:
+            raise CommissionIntegrationError("DISABLE_MECHANISM_MISMATCH")
+        if result.get("disabled") is not True:
+            raise CommissionIntegrationError("DISABLE_NOT_OBSERVED")
+        _required_receipt_string(result, "observed_at", "DISABLE_OBSERVED_AT_REQUIRED")
+        _required_receipt_string(
+            result, "disable_receipt_ref", "DISABLE_RECEIPT_REF_REQUIRED"
+        )
+        observer["enabled"] = False
+        if updated.get("state") in {"PROVEN", "SUSPECT"}:
+            updated["state"] = "INERT"
+            updated["failure"] = {
+                "kind": None,
+                "detail": None,
+                "observed_at": None,
+                "receipt_ref": None,
+            }
+        retained[index] = updated
+        receipts.append(result)
+        data["continuity"]["external_handoffs"].append(
+            {
+                "kind": "watch-disable-on-revocation",
+                "commission_id": updated.get("commission_id"),
+                **deepcopy(result),
+            }
+        )
+
+    if receipts:
+        data["revision"] = manifest.revision + 1
+        return MissionManifest.from_dict(data), receipts
+    return manifest, receipts
