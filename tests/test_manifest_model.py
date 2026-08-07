@@ -69,6 +69,16 @@ class MissionManifestTests(unittest.TestCase):
         payload["state"]["status"] = "active"
         self.assertTrue(any(x.startswith("REVOKED_STATE_INVALID:") for x in validate_manifest_dict(payload)))
 
+    def test_revocation_flag_must_be_a_real_boolean(self) -> None:
+        for value in (0, 1, "false"):
+            payload = clone_payload()
+            payload["authority"]["revoked"] = value
+            errors = validate_manifest_dict(payload)
+            self.assertTrue(
+                any(error.startswith("INVALID_REVOCATION_FLAG:") for error in errors),
+                (value, errors),
+            )
+
     def test_active_revision_after_one_requires_prior_checkpoint(self) -> None:
         payload = clone_payload()
         payload["revision"] = 2
