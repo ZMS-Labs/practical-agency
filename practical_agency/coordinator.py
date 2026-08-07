@@ -130,6 +130,18 @@ def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _pending_remediation_reason(manifest: MissionManifest) -> str | None:
+    blockers = manifest.state.get("blockers")
+    unresolved = manifest.integrity.get("unresolved_verdicts")
+    has_blockers = isinstance(blockers, list) and bool(blockers)
+    has_unresolved = isinstance(unresolved, list) and bool(unresolved)
+    if not (has_blockers or has_unresolved):
+        return None
+    expected = manifest.state.get("next_action")
+    label = expected if _nonempty_string(expected) else "<missing-next-action>"
+    return f"EXACT_REMEDIATION_ACTION_REQUIRED:{label}"
+
+
 def coordinate_once(
     manifest: MissionManifest,
     *,
@@ -147,6 +159,22 @@ def coordinate_once(
             None,
             None,
         )
+
+    remediation_reason = _pending_remediation_reason(manifest)
+    if remediation_reason is not None:
+        expected_action = manifest.state.get("next_action")
+        supplied_action = (
+            execution_request.get("action")
+            if isinstance(execution_request, Mapping)
+            else None
+        )
+        if supplied_action != expected_action or not _nonempty_string(expected_action):
+            return CoordinationDecision(
+                "BLOCK",
+                remediation_reason,
+                None,
+                _return_point(manifest, frontier_index),
+            )
 
     if completion_proposed:
         return CoordinationDecision(
