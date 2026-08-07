@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from practical_agency.capability_discovery import FileSystemSkillProvider
-from practical_agency.checkpoint_store import FileCheckpointStore, reconcile_observations
+from practical_agency.checkpoint_store import (
+    FileCheckpointStore,
+    apply_reconciliation_findings,
+    reconcile_observations,
+)
 from practical_agency.coordinator import coordinate_once, dispatch_once
 from practical_agency.manifest_model import MissionManifest
 from practical_agency.state_machine import MissionEvent, TransitionError, apply_event
@@ -21,9 +25,16 @@ class MemoryAdapter:
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(request)
         return {
+            "schema": "execution-receipt@1",
+            "request_id": request["request_id"],
+            "mission_id": request["mission_id"],
+            "mission_revision": request["mission_revision"],
+            "adapter_ref": "memory:test",
             "status": "completed",
-            "artifact_ref": f"artifact:call-{len(self.calls)}",
+            "artifact_refs": [f"artifact:call-{len(self.calls)}"],
             "observed_effects": request.get("requested_effects", []),
+            "external_receipt_ref": f"memory://receipt/{len(self.calls)}",
+            "coverage_limits": ["in-memory fixture only"],
         }
 
 
@@ -71,7 +82,11 @@ class EndToEndMissionTests(unittest.TestCase):
             result = dispatch_once(active, decision, adapter)
             acted = apply_event(
                 active,
-                MissionEvent("record_action", "mission-steward", {"action_ref": result["artifact_ref"]}),
+                MissionEvent(
+                    "record_action",
+                    "mission-steward",
+                    {"action_ref": result["artifact_refs"][0]},
+                ),
             )
             artifact_hash = hashlib.sha256(b"canonical artifact").hexdigest()
             observed = apply_event(
@@ -93,11 +108,20 @@ class EndToEndMissionTests(unittest.TestCase):
 
             findings = reconcile_observations(resumed, {"artifact:canonical": "different-live-hash"})
             self.assertEqual(findings[0].classification, "CONTRADICTED")
-            blocked = apply_event(
-                resumed,
-                MissionEvent("block", "mission-steward", {"reason": "live state contradicted checkpoint"}),
+            blocked = apply_reconciliation_findings(resumed, findings)
+            with self.assertRaisesRegex(TransitionError, "RECONCILIATION_OBSERVATION_REQUIRED"):
+                apply_event(blocked, MissionEvent("unblock", "mission-steward", {}))
+            reopened = apply_event(
+                blocked,
+                MissionEvent(
+                    "record_observation",
+                    "observer:test",
+                    {
+                        "artifact_ref": "artifact:validator-pass",
+                        "fact": {"subject_ref": "artifact:canonical", "value": artifact_hash},
+                    },
+                ),
             )
-            reopened = apply_event(blocked, MissionEvent("unblock", "mission-steward", {}))
 
             correction = coordinate_once(
                 reopened,
@@ -113,14 +137,40 @@ class EndToEndMissionTests(unittest.TestCase):
             correction_result = dispatch_once(reopened, correction, adapter)
             corrected = apply_event(
                 reopened,
-                MissionEvent("record_action", "mission-steward", {"action_ref": correction_result["artifact_ref"]}),
+                MissionEvent(
+                    "record_action",
+                    "mission-steward",
+                    {"action_ref": correction_result["artifact_refs"][0]},
+                ),
             )
             verifying = apply_event(corrected, MissionEvent("begin_verification", "mission-steward", {}))
 
             with self.assertRaisesRegex(TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"):
-                apply_event(verifying, MissionEvent("accept", "mission-steward", {"verdict": "PASS"}))
+                apply_event(
+                    verifying,
+                    MissionEvent(
+                        "accept",
+                        "mission-steward",
+                        {
+                            "verdict": "PASS",
+                            "evidence_refs": ["artifact:validator-pass"],
+                            "coverage_limits": [],
+                        },
+                    ),
+                )
 
-            completed = apply_event(verifying, MissionEvent("accept", "reviewer:test", {"verdict": "PASS"}))
+            completed = apply_event(
+                verifying,
+                MissionEvent(
+                    "accept",
+                    "reviewer:test",
+                    {
+                        "verdict": "PASS",
+                        "evidence_refs": ["artifact:validator-pass"],
+                        "coverage_limits": ["isolated fixture"],
+                    },
+                ),
+            )
             final_receipt = store.save(completed)
             final = store.load(final_receipt)
             self.assertEqual(final.state["status"], "completed")
