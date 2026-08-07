@@ -222,7 +222,7 @@ class WatchCommissionAdapterTests(unittest.TestCase):
             }
         ]
         manifest = MissionManifest.from_dict(payload)
-        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_ACTIVE"):
+        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_OPERATING"):
             handle_crossing_event(
                 manifest,
                 {
