@@ -24,7 +24,18 @@ class MemoryAdapter:
 
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(request)
-        return {"status": "completed", "artifact_ref": "artifact:one", "observed_effects": []}
+        return {
+            "schema": "execution-receipt@1",
+            "request_id": request["request_id"],
+            "mission_id": request["mission_id"],
+            "mission_revision": request["mission_revision"],
+            "adapter_ref": "fixture://memory-adapter",
+            "status": "completed",
+            "artifact_refs": ["artifact:one"],
+            "observed_effects": [],
+            "external_receipt_ref": "fixture://execution/one",
+            "coverage_limits": ["in-memory fixture only"],
+        }
 
 
 def capability(availability: str = "available") -> CapabilityDescriptor:
@@ -36,7 +47,7 @@ def capability(availability: str = "available") -> CapabilityDescriptor:
         description="Use for the bounded fixture question.",
         input_contract=None,
         output_contract=None,
-        authority_required=("repository:read",),
+        authority_required=("repository:write",),
         persistence=Persistence.SESSION,
         independence="actor",
         availability=availability,
@@ -65,6 +76,7 @@ class CoordinatorTests(unittest.TestCase):
             checkpoint_store=object(),
         )
         self.assertEqual(decision.kind, "DISPATCH")
+        self.assertIn("request_id", decision.request)
 
     def test_unresolved_claim_requests_capability_and_preserves_return_point(self) -> None:
         decision = coordinate_once(
@@ -101,8 +113,9 @@ class CoordinatorTests(unittest.TestCase):
             },
             checkpoint_store=object(),
         )
-        dispatch_once(self.active(), decision, adapter)
+        receipt = dispatch_once(self.active(), decision, adapter)
         self.assertEqual(len(adapter.calls), 1)
+        self.assertEqual(receipt["request_id"], decision.request["request_id"])
 
     def test_no_authority_means_no_dispatch(self) -> None:
         decision = coordinate_once(
@@ -187,7 +200,7 @@ class CoordinatorTests(unittest.TestCase):
         decision = coordinate_once(
             self.active(), unresolved_condition="Gate", selected_capability=capability(), checkpoint_store=object()
         )
-        with self.assertRaisesRegex(CoordinationError, "INVALID_CAPABILITY_RESULT_STATUS"):
+        with self.assertRaisesRegex(CoordinationError, "INVALID_CAPABILITY_RESULT:status"):
             apply_capability_result(
                 self.active(),
                 decision,
