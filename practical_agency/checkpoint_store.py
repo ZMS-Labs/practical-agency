@@ -34,9 +34,12 @@ class CheckpointReceipt:
         if payload.get("schema") != "checkpoint-receipt@1":
             raise CheckpointError("INVALID_CHECKPOINT_RECEIPT")
         try:
+            revision = payload["revision"]
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+                raise ValueError("revision must be a positive integer")
             return cls(
                 mission_id=str(payload["mission_id"]),
-                revision=int(payload["revision"]),
+                revision=revision,
                 path=str(payload["path"]),
                 sha256=str(payload["sha256"]),
                 created_at=str(payload["created_at"]),
