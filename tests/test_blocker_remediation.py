@@ -6,6 +6,7 @@ from practical_agency.authority import ActionRequest
 from practical_agency.capability_discovery import CapabilityDescriptor, Persistence
 from practical_agency.coordinator import MissionCoordinator
 from practical_agency.manifest_model import MissionManifest
+from practical_agency.state_machine import TransitionError, transition
 from tests.helpers import active_payload
 
 
@@ -63,6 +64,17 @@ def capability() -> CapabilityDescriptor:
     )
 
 
+class MustNotRunAdapter:
+    adapter_ref = "fixture://must-not-run"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def dispatch(self, request: dict[str, object]) -> dict[str, object]:
+        self.calls += 1
+        raise AssertionError("adapter must not run while remediation blocks the request")
+
+
 class BlockerRemediationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.coordinator = MissionCoordinator(checkpoint_store=object())
@@ -107,6 +119,29 @@ class BlockerRemediationTests(unittest.TestCase):
         )
         self.assertEqual(decision.kind, "BLOCK")
         self.assertIn("REMEDIATION_ACTION_MISSING", decision.reason)
+
+    def test_direct_dispatch_cannot_bypass_pending_remediation(self) -> None:
+        adapter = MustNotRunAdapter()
+        manifest = remediation_manifest()
+        updated, receipt = self.coordinator.dispatch_one(
+            manifest,
+            execution("write another unrelated artifact"),
+            adapter=adapter,
+            actor_ref="agent:test",
+        )
+        self.assertEqual(updated.to_dict(), manifest.to_dict())
+        self.assertEqual(receipt["status"], "blocked")
+        self.assertIn("EXACT_REMEDIATION_ACTION_REQUIRED", receipt["coverage_limits"])
+        self.assertEqual(adapter.calls, 0)
+
+    def test_lifecycle_transition_cannot_bypass_pending_remediation(self) -> None:
+        with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
+            transition(
+                remediation_manifest(),
+                "verifying",
+                actor_ref="agent:test",
+                evidence_ref="proof:premature",
+            )
 
 
 if __name__ == "__main__":
