@@ -27,7 +27,16 @@ jobs:
           python-version: "3.12"
 
       - name: Unit tests
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        run: |
+          set +e
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          code=$?
+          # unittest exits 5 when discovery finds no tests; treat that as green
+          # until the first behavior suite lands.
+          if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then
+            exit 0
+          fi
+          exit "$code"
 
       - name: Compile package and tests
         run: python -m compileall -q practical_agency tests
