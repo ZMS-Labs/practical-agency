@@ -49,7 +49,12 @@ class FakeAdapter:
 
     def disable(self, mechanism_ref: str) -> Mapping[str, Any]:
         self.disabled.append(mechanism_ref)
-        return {"mechanism_ref": mechanism_ref, "disabled": True}
+        return {
+            "mechanism_ref": mechanism_ref,
+            "disabled": True,
+            "observed_at": "2026-08-07T14:00:00Z",
+            "disable_receipt_ref": "external-fixture://disable/1",
+        }
 
 
 def base_commission() -> dict[str, Any]:
@@ -83,7 +88,24 @@ def base_commission() -> dict[str, Any]:
 
 
 def strict_fixture_verifier(record: Mapping[str, Any]) -> list[str]:
-    if record.get("state") == "INERT":
+    state = record.get("state")
+    if state == "DECLARED":
+        return []
+    if state == "BLOCKED" and record.get("block_reason") == "KILL_SWITCH_UNPROVEN":
+        observer = record.get("external_observer", {})
+        evidence = record.get("block_evidence", {})
+        limits = record.get("coverage_limits", [])
+        if (
+            isinstance(observer, Mapping)
+            and observer.get("mechanism_ref")
+            and observer.get("persistent_outside_session") is True
+            and observer.get("enabled") is False
+            and isinstance(evidence, Mapping)
+            and evidence.get("receipt_ref")
+            and "production coverage unestablished" in limits
+        ):
+            return []
+    if state == "INERT":
         observer = record.get("external_observer", {})
         kill = record.get("kill_switch", {})
         limits = record.get("coverage_limits", [])
@@ -98,7 +120,7 @@ def strict_fixture_verifier(record: Mapping[str, Any]) -> list[str]:
             and "production coverage unestablished" in limits
         ):
             return []
-    if record.get("state") == "BLOCKED" and record.get("block_reason") == "NO_EXECUTION_SUBSTRATE":
+    if state == "BLOCKED" and record.get("block_reason") == "NO_EXECUTION_SUBSTRATE":
         return []
     return ["UPSTREAM_VERIFIER_REJECTED"]
 
@@ -122,9 +144,10 @@ class WatchCommissionAdapterTests(unittest.TestCase):
 
     def test_prepared_mechanism_remains_blocked_until_kill_switch_proven(self) -> None:
         adapter = FakeAdapter()
-        prepared = prepare_disabled(base_commission(), adapter)
-        self.assertEqual(prepared["state"], "BLOCKED")
-        self.assertEqual(prepared["block_reason"], "KILL_SWITCH_UNPROVEN")
+        prepared = prepare_disabled(base_commission(), adapter, strict_fixture_verifier)
+        self.assertEqual(prepared.status, "VERIFIED_EXTERNAL_CONTRACT")
+        self.assertEqual(prepared.record["state"], "BLOCKED")
+        self.assertEqual(prepared.record["block_reason"], "KILL_SWITCH_UNPROVEN")
         inert = exercise_kill_switch(prepared, adapter, strict_fixture_verifier)
         self.assertEqual(inert.record["state"], "INERT")
         self.assertEqual(inert.status, "VERIFIED_EXTERNAL_CONTRACT")
@@ -138,7 +161,7 @@ class WatchCommissionAdapterTests(unittest.TestCase):
             retain_commission(self.manifest(), unverified)
 
     def test_rejected_external_record_is_not_retained(self) -> None:
-        rejected = accept_external_commission(base_commission(), strict_fixture_verifier)
+        rejected = accept_external_commission(base_commission(), lambda record: ["REJECTED"])
         self.assertEqual(rejected.status, "REJECTED_EXTERNAL_CONTRACT")
         with self.assertRaises(CommissionIntegrationError):
             retain_commission(self.manifest(), rejected)
@@ -150,12 +173,20 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         payload["continuity"]["watch_commissions"] = [
-            {"commission_id": "wc-1", "state": "PROVEN"}
+            {
+                "commission_id": "wc-1",
+                "state": "PROVEN",
+                "external_observer": {"enabled": True},
+            }
         ]
         manifest = MissionManifest.from_dict(payload)
         reopened = handle_crossing_event(
             manifest,
-            {"commission_id": "wc-1", "event_ref": "external-event://1", "observed_at": "2026-08-07T13:00:00Z"},
+            {
+                "commission_id": "wc-1",
+                "event_ref": "external-event://1",
+                "observed_at": "2026-08-07T13:00:00Z",
+            },
         )
         self.assertEqual(reopened.state["status"], "active")
         self.assertIn("triage crossing for commission wc-1", reopened.state["current_frontier"])
@@ -170,7 +201,11 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_RETAINED"):
             handle_crossing_event(
                 manifest,
-                {"commission_id": "missing", "event_ref": "external-event://1"},
+                {
+                    "commission_id": "missing",
+                    "event_ref": "external-event://1",
+                    "observed_at": "2026-08-07T13:00:00Z",
+                },
             )
 
     def test_crossing_requires_an_operating_retained_commission(self) -> None:
@@ -180,25 +215,44 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         payload["continuity"]["watch_commissions"] = [
-            {"commission_id": "wc-1", "state": "BLOCKED"}
+            {
+                "commission_id": "wc-1",
+                "state": "BLOCKED",
+                "external_observer": {"enabled": False},
+            }
         ]
         manifest = MissionManifest.from_dict(payload)
-        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_OPERATING"):
+        with self.assertRaisesRegex(CommissionIntegrationError, "COMMISSION_NOT_ACTIVE"):
             handle_crossing_event(
                 manifest,
-                {"commission_id": "wc-1", "event_ref": "external-event://1"},
+                {
+                    "commission_id": "wc-1",
+                    "event_ref": "external-event://1",
+                    "observed_at": "2026-08-07T13:00:00Z",
+                },
             )
 
     def test_revocation_disables_retained_mechanisms(self) -> None:
         payload = clone_payload()
+        payload["authority"]["revoked"] = True
+        payload["authority"]["revocation_reason"] = "operator stop"
+        payload["state"]["status"] = "cancelled"
         record = base_commission()
-        record["state"] = "INERT"
+        record["state"] = "PROVEN"
         record["external_observer"]["mechanism_ref"] = "fixture://watch/1"
+        record["external_observer"]["enabled"] = True
+        record["proof"]["alert_received"] = True
         payload["continuity"]["watch_commissions"] = [record]
         adapter = FakeAdapter()
-        receipts = disable_commissions_for_revocation(MissionManifest.from_dict(payload), adapter)
+        updated, receipts = disable_commissions_for_revocation(
+            MissionManifest.from_dict(payload), adapter
+        )
         self.assertEqual(adapter.disabled, ["fixture://watch/1"])
         self.assertTrue(receipts[0]["disabled"])
+        retained = updated.continuity["watch_commissions"][0]
+        self.assertEqual(retained["state"], "INERT")
+        self.assertFalse(retained["external_observer"]["enabled"])
+        self.assertTrue(retained["proof"]["alert_received"])
 
 
 if __name__ == "__main__":
