@@ -44,7 +44,11 @@
     "assumptions": [],
     "contradictions": [],
     "unknowns": [
-      "persistent observer availability"
+      {
+        "kind": "capability-availability",
+        "subject_ref": "external-observer",
+        "claim": "persistent observer availability remains unknown"
+      }
     ]
   },
   "state": {
