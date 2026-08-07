@@ -1,0 +1,9 @@
+{
+  "name": "Practical Agency",
+  "user": "ubuntu",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "install": "chmod +x scripts/cloud-agent-install.sh && ./scripts/cloud-agent-install.sh"
+}
