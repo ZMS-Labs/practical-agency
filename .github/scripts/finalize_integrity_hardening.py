@@ -68,6 +68,8 @@ def main() -> int:
     for relative in (
         ".github/scripts/finalize_integrity_hardening.py",
         ".github/workflows/finalize-integrity-hardening.yml",
+        ".github/scripts/reconcile_integrity_assertions.py",
+        ".github/workflows/reconcile-integrity-assertions.yml",
     ):
         path = ROOT / relative
         if path.exists():
