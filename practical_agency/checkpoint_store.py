@@ -261,12 +261,13 @@ def apply_reconciliation_findings(
     manifest: MissionManifest,
     findings: Sequence[ReconciliationFinding],
 ) -> MissionManifest:
-    """Reopen a mission and invalidate load-bearing proof for live-state drift.
+    """Reopen a repair frontier and invalidate load-bearing proof for live drift.
 
     The checkpoint store does not decide whether the live observation is correct;
     it records the contradiction as unresolved and removes prior completion/gate
-    artifacts from the set permitted to bear load. A fresh observation must clear
-    the reconciliation blocker through the state machine.
+    artifacts from the set permitted to bear load. The mission remains active so
+    one authorized corrective action can run, but verification is closed until a
+    fresh observation clears every reconciliation marker.
     """
 
     if not findings:
@@ -336,7 +337,7 @@ def apply_reconciliation_findings(
         }
     )
     if state["status"] != MissionStatus.CANCELLED.value:
-        state["status"] = MissionStatus.BLOCKED.value
-        state["next_action"] = "re-establish live proof for " + ", ".join(subjects)
+        state["status"] = MissionStatus.ACTIVE.value
+        state["next_action"] = "repair live state for " + ", ".join(subjects)
     data["revision"] = manifest.revision + 1
     return MissionManifest.from_dict(data)
