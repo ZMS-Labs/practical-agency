@@ -50,10 +50,15 @@ class MissionManifestTests(unittest.TestCase):
                 (value, errors),
             )
 
-    def test_status_enum_is_closed(self) -> None:
-        payload = clone_payload()
-        payload["state"]["status"] = "mostly-done"
-        self.assertTrue(any(x.startswith("INVALID_STATUS:") for x in validate_manifest_dict(payload)))
+    def test_status_enum_is_closed_and_non_string_values_fail_closed(self) -> None:
+        for value in ("mostly-done", [], {}, 1, True, None):
+            payload = clone_payload()
+            payload["state"]["status"] = value
+            errors = validate_manifest_dict(payload)
+            self.assertTrue(
+                any(error.startswith("INVALID_STATUS:") for error in errors),
+                (value, errors),
+            )
         self.assertEqual(MissionStatus.ACTIVE.value, "active")
 
     def test_unknown_keys_are_rejected_at_governed_levels(self) -> None:
@@ -63,6 +68,32 @@ class MissionManifestTests(unittest.TestCase):
         errors = validate_manifest_dict(payload)
         self.assertTrue(any("authority.unbounded_power" in x for x in errors))
         self.assertTrue(any("surprise" in x for x in errors))
+
+    def test_schema_invalid_structural_types_are_rejected_semantically(self) -> None:
+        cases = (
+            (("authority", "amendments"), [1], "INVALID_STRING_LIST:"),
+            (("authority", "permissions"), [1], "INVALID_STRING_LIST:"),
+            (("authority", "protected_state"), [1], "INVALID_STRING_LIST:"),
+            (("authority", "acceptable_costs"), [1], "INVALID_STRING_LIST:"),
+            (("authority", "escalation_required_for"), [1], "INVALID_STRING_LIST:"),
+            (("authority", "revocation_reason"), 1, "INVALID_OPTIONAL_STRING:"),
+            (("truth", "subject_refs"), [1], "INVALID_SUBJECT_REFS:"),
+            (("truth", "verified_facts"), [1], "INVALID_VERIFIED_FACT:"),
+            (("capabilities", "discovered_at"), 1, "INVALID_OPTIONAL_STRING:"),
+            (("continuity", "prior_checkpoint"), 1, "INVALID_OPTIONAL_STRING:"),
+            (("continuity", "decisions"), [1], "INVALID_OBJECT_LIST:"),
+            (("continuity", "external_handoffs"), [1], "INVALID_OBJECT_LIST:"),
+            (("continuity", "watch_commissions"), [1], "INVALID_OBJECT_LIST:"),
+            (("integrity", "completion_acceptor"), 1, "INVALID_OPTIONAL_STRING:"),
+        )
+        for path, value, prefix in cases:
+            payload = clone_payload()
+            payload[path[0]][path[1]] = value
+            errors = validate_manifest_dict(payload)
+            self.assertTrue(
+                any(error.startswith(prefix) for error in errors),
+                (path, value, errors),
+            )
 
     def test_completed_requires_acceptor_and_no_unresolved_verdicts(self) -> None:
         payload = clone_payload()
