@@ -117,6 +117,32 @@ def normalize_invocation(text: str) -> str | None:
     return None
 
 
+def _remediation_block(
+    manifest: MissionManifest, execution_request: ActionRequest | None
+) -> tuple[str, str] | None:
+    blockers = manifest.state["blockers"]
+    if not blockers:
+        return None
+    required = manifest.state["next_action"]
+    if not isinstance(required, str) or not required.strip():
+        return (
+            "REMEDIATION_ACTION_MISSING",
+            "load-bearing blockers exist without a recorded remediation action",
+        )
+    actual = (
+        execution_request.description.strip()
+        if execution_request is not None
+        and isinstance(execution_request.description, str)
+        else None
+    )
+    if actual != required.strip():
+        return (
+            "EXACT_REMEDIATION_ACTION_REQUIRED",
+            f"complete the recorded remediation first: {required.strip()}",
+        )
+    return None
+
+
 def _blocked_manifest(manifest: MissionManifest, *, code: str, detail: str) -> MissionManifest:
     payload = manifest.to_dict()
     payload["revision"] = manifest.revision + 1
@@ -173,6 +199,11 @@ class MissionCoordinator:
     ) -> CoordinationDecision:
         if manifest.authority["revoked"] or manifest.state["status"] in {"completed", "cancelled"}:
             return CoordinationDecision("BLOCK", "mission authority is unavailable or terminal", None, None)
+
+        remediation_block = _remediation_block(manifest, execution_request)
+        if remediation_block is not None:
+            code, detail = remediation_block
+            return CoordinationDecision("BLOCK", f"{code}: {detail}", None, None)
 
         if requested_capability_id is not None:
             candidates = [item for item in capabilities if item.capability_id == requested_capability_id]
@@ -313,8 +344,25 @@ class MissionCoordinator:
         if not isinstance(adapter_ref, str) or not adapter_ref.strip():
             raise ValueError("ADAPTER_REF_REQUIRED: execution adapter must identify itself")
 
-        authority = evaluate_action(manifest, request)
         request_id = f"exec:{manifest.mission_id}:r{manifest.revision}:{request.action_id}"
+        remediation_block = _remediation_block(manifest, request)
+        if remediation_block is not None:
+            code, detail = remediation_block
+            receipt = {
+                "schema": "execution-receipt@1",
+                "request_id": request_id,
+                "adapter_ref": adapter_ref,
+                "status": "blocked",
+                "observed_effects": [
+                    {"kind": "remediation-lock", "code": code, "detail": detail}
+                ],
+                "artifact_refs": [],
+                "recorded_at": self._recorded_at(),
+                "coverage_limits": [code],
+            }
+            return manifest, receipt
+
+        authority = evaluate_action(manifest, request)
         if not authority.allowed:
             receipt = {
                 "schema": "execution-receipt@1",

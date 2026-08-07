@@ -40,6 +40,10 @@ def transition(
         )
     if target_value not in _ALLOWED.get(current, set()):
         raise TransitionError(f"ILLEGAL_TRANSITION: {current} -> {target_value}")
+    if target_value in {"verifying", "completed"} and manifest.state["blockers"]:
+        raise TransitionError(
+            "UNRESOLVED_BLOCKERS: exact recorded remediation must complete first"
+        )
     if target_value in {"blocked", "paused"} and not reason:
         raise TransitionError(
             "BLOCK_REASON_REQUIRED: name why the mission stops"
