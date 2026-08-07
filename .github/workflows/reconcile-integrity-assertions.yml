@@ -1,0 +1,59 @@
+name: reconcile-integrity-assertions
+
+"on":
+  push:
+    branches:
+      - chatgpt/implement-practical-agency-v0.1
+    paths:
+      - .github/scripts/reconcile_integrity_assertions.py
+      - .github/workflows/reconcile-integrity-assertions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out latest writable branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: chatgpt/implement-practical-agency-v0.1
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Apply exact assertion reconciliation
+        run: python .github/scripts/reconcile_integrity_assertions.py
+      - name: Remove temporary migration machinery
+        run: |
+          rm .github/scripts/reconcile_integrity_assertions.py
+          rm .github/workflows/reconcile-integrity-assertions.yml
+      - name: Run full deterministic and package gates
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python -m compileall -q practical_agency tests .github/scripts
+          python .github/scripts/check_contracts.py
+          python .github/scripts/check_package.py
+          python .github/scripts/check_public_content.py
+          git diff --check
+      - name: Commit verified product tree
+        run: |
+          git add -A
+          git diff --cached --check
+          git diff --cached --quiet && { echo "expected assertion diff"; exit 1; } || true
+          git config user.name "SternOne"
+          git config user.email "89846440+SternOne@users.noreply.github.com"
+          git commit -m "test: reconcile hardened integrity assertions
+
+          Align the regression corpus with the intentional public semantics: operating rather than merely active commissions, an active reconciliation repair frontier with load-bearing blockers, and the dedicated subject-reference validation code.
+
+          Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
+      - name: Prove final hygiene and push
+        run: |
+          test ! -e .github/scripts/reconcile_integrity_assertions.py
+          test ! -e .github/workflows/reconcile-integrity-assertions.yml
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:chatgpt/implement-practical-agency-v0.1
