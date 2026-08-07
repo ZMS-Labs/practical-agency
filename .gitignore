@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/

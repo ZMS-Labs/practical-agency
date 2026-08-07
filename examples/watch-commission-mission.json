@@ -1,0 +1,71 @@
+{
+  "schema": "mission-manifest@1",
+  "mission_id": "mission-watch-disk",
+  "revision": 1,
+  "authority": {
+    "operator_ref": "operator:test",
+    "instruction": "Commission a proven external disk-space alert.",
+    "amendments": [],
+    "permissions": ["repository:write", "observer:commission"],
+    "protected_state": ["production credentials"],
+    "acceptable_costs": ["one monitoring rule"],
+    "escalation_required_for": ["destructive action"],
+    "revoked": false,
+    "revocation_reason": null
+  },
+  "outcome": {
+    "desired_state": "An external observer is PROVEN for disk-space alerts.",
+    "completion_proof": ["watch-commission PROVEN receipt"],
+    "integrity_guards": ["upstream verifier accepted the commission"],
+    "scope_proof": ["only the named observer mechanism is enabled"],
+    "stop_conditions": ["operator revokes authority"]
+  },
+  "truth": {
+    "subject_refs": ["observer:disk-space"],
+    "verified_facts": [],
+    "assumptions": [],
+    "contradictions": [],
+    "unknowns": []
+  },
+  "state": {
+    "status": "draft",
+    "completed_actions": [],
+    "current_frontier": ["commission observer"],
+    "blockers": [],
+    "next_action": "commission observer"
+  },
+  "capabilities": {
+    "discovered_at": null,
+    "available": [],
+    "invoked": [],
+    "unavailable": [],
+    "degraded": []
+  },
+  "continuity": {
+    "prior_checkpoint": null,
+    "durable_artifacts": [],
+    "decisions": [],
+    "external_handoffs": [],
+    "watch_commissions": [
+      {
+        "schema": "watch-commission@1",
+        "commission_id": "wc-disk-1",
+        "state": "BLOCKED",
+        "block_reason": "NO_EXECUTION_SUBSTRATE",
+        "block_evidence": {
+          "detail": "no scheduler available in this harness",
+          "observed_at": "2026-08-07T00:00:00Z",
+          "receipt_ref": "discovery:none"
+        },
+        "proof": {},
+        "observed_failure": {}
+      }
+    ]
+  },
+  "integrity": {
+    "actor_may_self_accept": false,
+    "required_gates": [],
+    "unresolved_verdicts": [],
+    "completion_acceptor": "acceptor:independent"
+  }
+}
