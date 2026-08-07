@@ -125,6 +125,14 @@ def _all_nonempty_strings(value: object) -> bool:
     return isinstance(value, list) and all(_nonempty_string(item) for item in value)
 
 
+def _optional_string(value: object) -> bool:
+    return value is None or isinstance(value, str)
+
+
+def _all_mappings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, Mapping) for item in value)
+
+
 def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
     if not isinstance(payload, Mapping):
         return ["RECORD_MUST_BE_OBJECT: root must be an object"]
@@ -173,6 +181,21 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
         errors.append("OPERATOR_REQUIRED: authority.operator_ref must be non-empty")
     if not _nonempty_string(authority.get("instruction")):
         errors.append("INSTRUCTION_REQUIRED: authority.instruction must be non-empty")
+    for field in (
+        "amendments",
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+    ):
+        if not _all_nonempty_strings(authority.get(field)):
+            errors.append(
+                f"INVALID_STRING_LIST: authority.{field} must contain only non-empty strings"
+            )
+    if not _optional_string(authority.get("revocation_reason")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: authority.revocation_reason must be null or a string"
+        )
     if not isinstance(authority.get("revoked"), bool):
         errors.append("INVALID_REVOCATION_FLAG: authority.revoked must be boolean")
     if authority.get("revoked") is True and not _nonempty_string(
@@ -197,11 +220,60 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
     subject_refs = truth.get("subject_refs")
     if not isinstance(subject_refs, list) or not subject_refs:
         errors.append("SUBJECT_REF_REQUIRED: truth.subject_refs must be non-empty")
+    elif not _all_nonempty_strings(subject_refs):
+        errors.append(
+            "INVALID_SUBJECT_REFS: truth.subject_refs must contain only non-empty strings"
+        )
 
-    status = state.get("status")
+    verified_facts = truth.get("verified_facts")
+    if isinstance(verified_facts, list):
+        for index, fact in enumerate(verified_facts):
+            if not isinstance(fact, Mapping):
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}] must be an object"
+                )
+                continue
+            _unknown_keys(
+                errors,
+                f"truth.verified_facts[{index}]",
+                fact,
+                {"subject_ref", "value"},
+            )
+            if set(fact) != {"subject_ref", "value"}:
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}] must contain subject_ref and value"
+                )
+            elif not _nonempty_string(fact.get("subject_ref")):
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}].subject_ref must be non-empty"
+                )
+
+    capabilities = governed.get("capabilities", {})
+    if not _optional_string(capabilities.get("discovered_at")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: capabilities.discovered_at must be null or a string"
+        )
+
+    if not _optional_string(continuity.get("prior_checkpoint")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: continuity.prior_checkpoint must be null or a string"
+        )
+    for field in ("decisions", "external_handoffs", "watch_commissions"):
+        if not _all_mappings(continuity.get(field)):
+            errors.append(
+                f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
+            )
+
+    if not _optional_string(integrity.get("completion_acceptor")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: integrity.completion_acceptor must be null or a string"
+        )
+
+    raw_status = state.get("status")
+    status = raw_status if isinstance(raw_status, str) else None
     allowed_status = {item.value for item in MissionStatus}
     if status not in allowed_status:
-        errors.append(f"INVALID_STATUS: {status!r} is not a mission status")
+        errors.append(f"INVALID_STATUS: {raw_status!r} is not a mission status")
 
     next_action = state.get("next_action")
     if next_action is not None and not _nonempty_string(next_action):
