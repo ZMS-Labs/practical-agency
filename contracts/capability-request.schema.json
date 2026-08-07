@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/capability-request@1",
+  "title": "capability-request@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "mission_id", "mission_revision", "capability_id", "source_sha256", "bounded_request", "authority_ref", "expected_output_contract", "return_point", "stop_condition"],
+  "properties": {
+    "schema": {"const": "capability-request@1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "mission_id": {"type": "string", "minLength": 1},
+    "mission_revision": {"type": "integer", "minimum": 1},
+    "capability_id": {"type": "string", "minLength": 1},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "bounded_request": {"type": "string", "minLength": 1},
+    "authority_ref": {"type": ["string", "null"]},
+    "expected_output_contract": {"type": ["string", "null"]},
+    "return_point": {"type": "object"},
+    "stop_condition": {"type": "string", "minLength": 1}
+  }
+}

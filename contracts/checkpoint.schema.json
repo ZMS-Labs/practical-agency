@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/checkpoint@1",
+  "title": "checkpoint@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mission_id", "revision", "prior_checkpoint", "manifest", "events", "receipts"],
+  "properties": {
+    "schema": {"const": "checkpoint@1"},
+    "mission_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "prior_checkpoint": {"type": ["string", "null"]},
+    "manifest": {"type": "object"},
+    "events": {"type": "array", "items": {"type": "object"}},
+    "receipts": {"type": "array", "items": {"type": "object"}}
+  }
+}

@@ -1,0 +1,85 @@
+name: apply-independent-integrity
+
+"on":
+  push:
+    branches:
+      - chatgpt/manifest-mission-kernel
+    paths:
+      - ".github/workflows/apply-independent-integrity.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 36
+    steps:
+      - name: Check out the implementation branch with push credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: chatgpt/manifest-mission-kernel
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Apply the structure-aware integrity implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_independent_integrity.py')
+          text = path.read_text(encoding='utf-8')
+          old = '            "truth.verified_facts",\n'
+          new = '            "object_list_fields",\n'
+          if text.count(old) != 1:
+              raise SystemExit('integrity helper self-check anchor drifted')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python .github/scripts/apply_independent_integrity.py
+      - name: Run the imported independent integrity corpus
+        run: python -m unittest tests.test_concurrent_review_invariants -v
+      - name: Run affected lifecycle and end-to-end tests
+        run: python -m unittest tests.test_state_machine tests.test_end_to_end_mission tests.test_blocker_remediation -v
+      - name: Run the full deterministic gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python -m compileall -q practical_agency tests
+          python .github/scripts/check_repo.py --self-test
+          python .github/scripts/check_repo.py
+          python .github/scripts/check_dco.py --self-test
+      - name: Build and import the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/practical-agency-integrity-wheel /tmp/practical-agency-integrity-target
+          mkdir -p /tmp/practical-agency-integrity-wheel /tmp/practical-agency-integrity-target
+          python -m pip wheel --no-deps --wheel-dir /tmp/practical-agency-integrity-wheel .
+          python -m pip install --no-deps --target /tmp/practical-agency-integrity-target /tmp/practical-agency-integrity-wheel/*.whl
+          (cd /tmp && PYTHONPATH=/tmp/practical-agency-integrity-target python -c "import practical_agency; assert practical_agency.__version__ == '0.1.0'")
+      - name: Commit and push only the tested integrity changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "SternOne"
+          git config user.email "89846440+SternOne@users.noreply.github.com"
+          git add -A -- \
+            practical_agency/state_machine.py \
+            practical_agency/validation.py \
+            practical_agency/checkpoint_store.py \
+            tests/test_end_to_end_mission.py \
+            tests/test_state_machine.py \
+            .github/scripts/apply_independent_integrity.py
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 6
+          test ! -e .github/scripts/apply_independent_integrity.py
+          git commit -m "fix: bind mission progress to independent evidence" \
+            -m "Reject symlinked checkpoints and malformed operational records; require gates and retain proof before verification; make contradictions load-bearing until separately reconciled; and preserve independent PASS, FAIL, and INCONCLUSIVE verdicts as durable mission state." \
+            -m "Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
+          python .github/scripts/check_dco.py --base origin/main --head HEAD
+          git push origin HEAD:chatgpt/manifest-mission-kernel

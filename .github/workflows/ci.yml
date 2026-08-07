@@ -1,0 +1,66 @@
+name: ci
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-kernel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the tested revision without stored credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Unit and end-to-end tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile deterministic kernel
+        run: python -m compileall -q practical_agency tests
+      - name: Repository contract self-test
+        run: python .github/scripts/check_repo.py --self-test
+      - name: Repository contract
+        run: python .github/scripts/check_repo.py
+      - name: DCO checker self-test
+        run: python .github/scripts/check_dco.py --self-test
+      - name: DCO
+        run: python .github/scripts/check_dco.py
+      - name: Build wheel without dependency resolution
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+      - name: Install and import the built wheel
+        shell: bash
+        run: |
+          rm -rf /tmp/practical-agency-wheel-test
+          python -m pip install --no-deps --target /tmp/practical-agency-wheel-test dist/*.whl
+          (cd /tmp && PYTHONPATH=/tmp/practical-agency-wheel-test python -c "import practical_agency; assert practical_agency.__version__ == '0.1.0'")
+      - name: Committed diff and conflict-marker check
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before || '' }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "pull_request" && -n "$PR_BASE_SHA" ]]; then
+            BASE_SHA="$PR_BASE_SHA"
+            HEAD_SHA="$PR_HEAD_SHA"
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          elif [[ "$EVENT_NAME" == "push" && -n "$PUSH_BEFORE_SHA" && "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$PUSH_BEFORE_SHA"
+            git diff --check "$BASE_SHA...$HEAD_SHA"
+          else
+            git show --check --format= "$HEAD_SHA"
+          fi
+          ! git grep -nE '^(<<<<<<<|=======|>>>>>>>)'

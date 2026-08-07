@@ -1,0 +1,108 @@
+{
+  "schema": "mission-manifest@1",
+  "mission_id": "mission-watch-example",
+  "revision": 1,
+  "authority": {
+    "operator_ref": "operator:example",
+    "instruction": "Establish a proven external disk-space alert without claiming persistence before it exists.",
+    "amendments": [],
+    "permissions": [
+      "watch:prepare"
+    ],
+    "protected_state": [
+      "production outage"
+    ],
+    "acceptable_costs": [
+      "isolated fixture proof"
+    ],
+    "escalation_required_for": [
+      "production enablement"
+    ],
+    "revoked": false,
+    "revocation_reason": null
+  },
+  "outcome": {
+    "desired_state": "An external observer is commissioned and independently verified.",
+    "completion_proof": [
+      "upstream verifier accepts the final commission"
+    ],
+    "integrity_guards": [
+      "Practical Agency never synthesizes PROVEN"
+    ],
+    "scope_proof": [
+      "only the isolated fixture adapter is exercised"
+    ],
+    "stop_conditions": [
+      "no safe proof crossing exists"
+    ]
+  },
+  "truth": {
+    "subject_refs": [
+      "fixture:disk-space"
+    ],
+    "verified_facts": [],
+    "assumptions": [],
+    "contradictions": [],
+    "unknowns": [
+      {
+        "kind": "capability-availability",
+        "subject_ref": "external-observer",
+        "claim": "persistent observer availability remains unknown"
+      }
+    ]
+  },
+  "state": {
+    "status": "blocked",
+    "completed_actions": [],
+    "current_frontier": [
+      "obtain an external execution substrate"
+    ],
+    "blockers": [
+      {
+        "code": "NO_EXECUTION_SUBSTRATE"
+      }
+    ],
+    "next_action": "obtain an external execution substrate"
+  },
+  "capabilities": {
+    "discovered_at": null,
+    "available": [],
+    "invoked": [],
+    "unavailable": [],
+    "degraded": []
+  },
+  "continuity": {
+    "prior_checkpoint": null,
+    "durable_artifacts": [],
+    "decisions": [],
+    "external_handoffs": [],
+    "watch_commissions": [
+      {
+        "external_contract_status": "UNVERIFIED_EXTERNAL_CONTRACT",
+        "errors": [
+          "UPSTREAM_VERIFIER_UNAVAILABLE"
+        ],
+        "record": {
+          "schema": "watch-commission@1",
+          "commission_id": "wc-disk-space-example",
+          "state": "BLOCKED",
+          "block_reason": "NO_EXECUTION_SUBSTRATE",
+          "coverage_limits": [
+            "example only; no production observer exists"
+          ]
+        }
+      }
+    ]
+  },
+  "integrity": {
+    "actor_may_self_accept": false,
+    "material_work_actors": [],
+    "required_gates": [
+      "upstream watch verifier",
+      "independent acceptor"
+    ],
+    "unresolved_verdicts": [],
+    "completion_acceptor": null,
+    "acceptance_receipt_ref": null
+  }
+}
