@@ -1,0 +1,28 @@
+name: blocker-remediation-red
+
+"on":
+  push:
+    branches:
+      - chatgpt/implement-practical-agency-v0.1
+    paths:
+      - tests/test_blocker_remediation.py
+      - .github/workflows/blocker-remediation-red.yml
+
+permissions:
+  contents: read
+
+jobs:
+  red:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact RED revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Blocker remediation RED test
+        run: python -m unittest tests.test_blocker_remediation -v
