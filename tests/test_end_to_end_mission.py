@@ -24,6 +24,7 @@ class MemoryAdapter:
 
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(request)
+        call = len(self.calls)
         return {
             "schema": "execution-receipt@1",
             "request_id": request["request_id"],
@@ -31,9 +32,9 @@ class MemoryAdapter:
             "mission_revision": request["mission_revision"],
             "adapter_ref": "memory:test",
             "status": "completed",
-            "artifact_refs": [f"artifact:call-{len(self.calls)}"],
+            "artifact_refs": [f"artifact:call-{call}"],
             "observed_effects": request.get("requested_effects", []),
-            "external_receipt_ref": f"memory://receipt/{len(self.calls)}",
+            "external_receipt_ref": f"memory://receipt/{call}",
             "coverage_limits": ["in-memory fixture only"],
         }
 
@@ -52,7 +53,11 @@ class EndToEndMissionTests(unittest.TestCase):
             first_receipt = store.save(draft)
             active = apply_event(
                 draft,
-                MissionEvent("approve", "operator:test", {"checkpoint_ref": first_receipt.path}),
+                MissionEvent(
+                    "approve",
+                    "operator:test",
+                    {"checkpoint_ref": first_receipt.path},
+                ),
             )
 
             skills = root / "skills"
@@ -65,7 +70,9 @@ class EndToEndMissionTests(unittest.TestCase):
                 encoding="utf-8",
             )
             discovered = FileSystemSkillProvider(skills).discover()
-            self.assertEqual([item.capability_id for item in discovered], ["fixture-writer"])
+            self.assertEqual(
+                [item.capability_id for item in discovered], ["fixture-writer"]
+            )
 
             adapter = MemoryAdapter()
             decision = coordinate_once(
@@ -96,7 +103,10 @@ class EndToEndMissionTests(unittest.TestCase):
                     "observer:test",
                     {
                         "artifact_ref": "artifact:validator-pass",
-                        "fact": {"subject_ref": "artifact:canonical", "value": artifact_hash},
+                        "fact": {
+                            "subject_ref": "artifact:canonical",
+                            "value": artifact_hash,
+                        },
                     },
                 ),
             )
@@ -106,22 +116,23 @@ class EndToEndMissionTests(unittest.TestCase):
             resumed = store.load(checkpoint)
             self.assertEqual(resumed.authority["instruction"], original_instruction)
 
-            findings = reconcile_observations(resumed, {"artifact:canonical": "different-live-hash"})
-            self.assertEqual(findings[0].classification, "CONTRADICTED")
-            blocked = apply_reconciliation_findings(resumed, findings)
-            with self.assertRaisesRegex(TransitionError, "RECONCILIATION_OBSERVATION_REQUIRED"):
-                apply_event(blocked, MissionEvent("unblock", "mission-steward", {}))
-            reopened = apply_event(
-                blocked,
-                MissionEvent(
-                    "record_observation",
-                    "observer:test",
-                    {
-                        "artifact_ref": "artifact:validator-pass",
-                        "fact": {"subject_ref": "artifact:canonical", "value": artifact_hash},
-                    },
-                ),
+            live_hash = hashlib.sha256(b"unexpected live artifact").hexdigest()
+            findings = reconcile_observations(
+                resumed, {"artifact:canonical": live_hash}
             )
+            self.assertEqual(findings[0].classification, "CONTRADICTED")
+            reopened = apply_reconciliation_findings(resumed, findings)
+            self.assertEqual(reopened.state["status"], "active")
+            self.assertTrue(reopened.state["blockers"])
+            self.assertNotIn(
+                "artifact:validator-pass",
+                reopened.continuity["durable_artifacts"],
+            )
+            with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
+                apply_event(
+                    reopened,
+                    MissionEvent("begin_verification", "mission-steward", {}),
+                )
 
             correction = coordinate_once(
                 reopened,
@@ -130,7 +141,7 @@ class EndToEndMissionTests(unittest.TestCase):
                     "requested_permissions": ["repository:write"],
                     "requested_effects": ["intended files"],
                     "estimated_costs": ["one feature branch"],
-                    "action": "repair canonical artifact",
+                    "action": reopened.state["next_action"],
                 },
                 checkpoint_store=store,
             )
@@ -143,39 +154,59 @@ class EndToEndMissionTests(unittest.TestCase):
                     {"action_ref": correction_result["artifact_refs"][0]},
                 ),
             )
-            verifying = apply_event(corrected, MissionEvent("begin_verification", "mission-steward", {}))
+            self.assertNotIn(
+                "artifact:validator-pass",
+                corrected.continuity["durable_artifacts"],
+            )
 
-            with self.assertRaisesRegex(TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"):
+            repaired_hash = hashlib.sha256(b"repaired canonical artifact").hexdigest()
+            reobserved = apply_event(
+                corrected,
+                MissionEvent(
+                    "record_observation",
+                    "observer:test",
+                    {
+                        "artifact_ref": "artifact:validator-pass",
+                        "fact": {
+                            "subject_ref": "artifact:canonical",
+                            "value": repaired_hash,
+                        },
+                    },
+                ),
+            )
+            self.assertEqual(reobserved.state["blockers"], [])
+            self.assertEqual(reobserved.integrity["unresolved_verdicts"], [])
+            verifying = apply_event(
+                reobserved,
+                MissionEvent("begin_verification", "mission-steward", {}),
+            )
+
+            verdict = {
+                "verdict": "PASS",
+                "evidence_refs": ["artifact:independent-review"],
+                "coverage_limits": ["isolated fixture"],
+            }
+            with self.assertRaisesRegex(
+                TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"
+            ):
                 apply_event(
                     verifying,
-                    MissionEvent(
-                        "accept",
-                        "mission-steward",
-                        {
-                            "verdict": "PASS",
-                            "evidence_refs": ["artifact:validator-pass"],
-                            "coverage_limits": [],
-                        },
-                    ),
+                    MissionEvent("accept", "mission-steward", verdict),
                 )
 
             completed = apply_event(
                 verifying,
-                MissionEvent(
-                    "accept",
-                    "reviewer:test",
-                    {
-                        "verdict": "PASS",
-                        "evidence_refs": ["artifact:validator-pass"],
-                        "coverage_limits": ["isolated fixture"],
-                    },
-                ),
+                MissionEvent("accept", "reviewer:test", verdict),
             )
             final_receipt = store.save(completed)
             final = store.load(final_receipt)
             self.assertEqual(final.state["status"], "completed")
             self.assertEqual(final.authority["instruction"], original_instruction)
             self.assertEqual(len(adapter.calls), 2)
+            self.assertEqual(
+                final.continuity["decisions"][-1]["evidence_refs"],
+                ["artifact:independent-review"],
+            )
 
 
 if __name__ == "__main__":
