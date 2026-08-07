@@ -1,0 +1,54 @@
+name: finalize-integrity-hardening
+
+"on":
+  push:
+    branches:
+      - chatgpt/implement-practical-agency-v0.1
+    paths:
+      - ".github/workflows/finalize-integrity-hardening.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch with push credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: chatgpt/implement-practical-agency-v0.1
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Apply exact migration
+        run: python .github/scripts/finalize_integrity_hardening.py
+      - name: Run complete deterministic gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python -m compileall -q practical_agency tests .github/scripts
+          python .github/scripts/check_contracts.py
+          python .github/scripts/check_package.py
+          python .github/scripts/check_public_content.py
+          git diff --check
+      - name: Commit verified correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Expected migration produced no diff" >&2
+            exit 1
+          fi
+          git config user.name "SternOne"
+          git config user.email "89846440+SternOne@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: close final mission integrity mismatches" \
+            -m "Align semantic and structural string-list boundaries, normalize inactive commission refusal naming, and retain the complete 89-test integrity suite." \
+            -m "Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
+          git push origin HEAD:chatgpt/implement-practical-agency-v0.1
