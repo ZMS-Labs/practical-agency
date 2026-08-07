@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from practical_agency.checkpoint_store import CheckpointError, FileCheckpointStore, reconcile_observations
+from practical_agency.checkpoint_store import CheckpointError, CheckpointReceipt, FileCheckpointStore, reconcile_observations
 from practical_agency.manifest_model import MissionManifest
 from tests.helpers import clone_payload
 
@@ -46,6 +46,18 @@ class CheckpointStoreTests(unittest.TestCase):
             Path(receipt.path).write_text("{}\n", encoding="utf-8")
             with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_HASH_MISMATCH"):
                 store.load(receipt)
+
+    def test_receipt_revision_must_be_a_real_positive_integer(self) -> None:
+        payload = {
+            "schema": "checkpoint-receipt@1",
+            "mission_id": "mission-001",
+            "revision": True,
+            "path": "checkpoint.json",
+            "sha256": "0" * 64,
+            "created_at": "2026-08-07T12:00:00Z",
+        }
+        with self.assertRaisesRegex(CheckpointError, "INVALID_CHECKPOINT_RECEIPT"):
+            CheckpointReceipt.from_dict(payload)
 
     def test_load_latest_returns_highest_valid_revision(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
