@@ -8,19 +8,49 @@ package registry release, live harness installation, or background service exist
 - strict mission-manifest validation and canonical round trips;
 - verbatim operator-intent preservation and append-only amendments;
 - closed authority and state transitions;
-- independent acceptance required for material completion;
-- atomic hash-bound checkpoints and crash/restart recovery;
-- stale-state contradiction detection;
+- completion proof and declared gates required before verification;
+- evidence-bearing independent acceptance or rejection for material completion;
+- atomic hash-bound checkpoints, canonical path confinement, and crash/restart
+  recovery;
+- live-state contradictions invalidate affected proof, create load-bearing
+  reconciliation markers, open one bounded repair frontier, and require fresh
+  observation before renewed verification;
 - dynamic capability discovery without a copied inventory;
+- exact capability request/result and execution request/receipt binding;
 - one bounded dispatch per decision and exact return-point restoration;
-- refusal to rewrite `NO-GO` or `FAIL`; and
-- commission retention only after an injected upstream verifier accepts it.
+- blockers and unresolved verdicts permit only the exact recorded remediation
+  execution;
+- refusal to rewrite `NO-GO` or `FAIL`;
+- commission adapter operations occur only after the injected upstream verifier
+  accepts the input contract;
+- revoked or non-operating commissions cannot reopen missions; and
+- disablement on revocation updates retained current state while preserving
+  historical proof.
+
+## Pinned cross-repository compatibility
+
+Permanent CI checks out `ZMS-Labs/epistemic-skills` at immutable revision
+`6e26484a9cae7629b233734fe5121137ba9168a8` and uses the actual
+`watch-commission@1` semantic verifier and committed example corpus.
+
+The integration fixtures prove that:
+
+- upstream accepted and rejected examples preserve their oracles through the
+  Practical Agency intake boundary;
+- Practical Agency's disabled preparation is accepted upstream as
+  `BLOCKED: KILL_SWITCH_UNPROVEN`; and
+- `manifest` is rejected as a post-crossing `handoff.on_crossing` value.
+
+This is compatibility evidence at one pinned revision. It is not evidence that
+receipt references are authentic, that a production adapter exists, or that an
+automatic `watch` → `manifest` route has been admitted.
 
 ## Structurally verified
 
 - exactly one public skill named `manifest`;
 - resident description within the recorded 420-byte v0.1 ceiling;
-- plugin metadata points to the canonical root `skills/` directory;
+- harness metadata uses the canonical root `skills/` body without a copied skill
+  inventory;
 - all committed JSON files parse; and
 - schemas, package boundaries, public-content checks, and Python compilation pass.
 
@@ -38,5 +68,6 @@ package registry release, live harness installation, or background service exist
 - autonomous background operation;
 - independent machine ends or sovereign authority;
 - universal efficacy or safety;
-- a production observer commissioned by installing this package; or
+- a production observer commissioned by installing this package;
+- an automatic cross-package commission handoff; or
 - permission for the mission steward to certify its own material work.
