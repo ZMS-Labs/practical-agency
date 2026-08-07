@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  stdlib-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Compile package and tests
+        run: python -m compileall -q practical_agency tests
+
+      - name: Parse committed JSON
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          roots = [Path("."), Path(".cursor-plugin"), Path(".claude-plugin"), Path("contracts"), Path("examples")]
+          paths = []
+          for root in Path(".").rglob("*.json"):
+              if ".git" in root.parts:
+                  continue
+              paths.append(root)
+          for path in sorted(paths):
+              json.loads(path.read_text(encoding="utf-8"))
+              print(f"ok {path}")
+          print(f"parsed {len(paths)} json files")
+          PY
+
+      - name: Exactly one public skill named manifest
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          skills = sorted(Path("skills").glob("*/SKILL.md"))
+          names = [path.parent.name for path in skills]
+          assert names == ["manifest"], names
+          print("skill inventory ok: skills/manifest/SKILL.md")
+          PY
+
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Author-matching DCO
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: python .github/scripts/check_dco.py
