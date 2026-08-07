@@ -146,16 +146,13 @@ jobs:
 
           replace_once(
               state_machine,
-              '''    if target_value not in _ALLOWED.get(current, set()):
-                      raise TransitionError(f"ILLEGAL_TRANSITION: {current} -> {target_value}")
-                  if target_value in {"blocked", "paused"} and not reason:''',
-              '''    if target_value not in _ALLOWED.get(current, set()):
-                      raise TransitionError(f"ILLEGAL_TRANSITION: {current} -> {target_value}")
-                  if target_value in {"verifying", "completed"} and manifest.state["blockers"]:
-                      raise TransitionError(
-                          "UNRESOLVED_BLOCKERS: exact recorded remediation must complete first"
-                      )
-                  if target_value in {"blocked", "paused"} and not reason:''',
+              '    if target_value in {"blocked", "paused"} and not reason:\n',
+              '''    if target_value in {"verifying", "completed"} and manifest.state["blockers"]:
+                  raise TransitionError(
+                      "UNRESOLVED_BLOCKERS: exact recorded remediation must complete first"
+                  )
+              if target_value in {"blocked", "paused"} and not reason:
+          ''',
           )
           PY
       - name: Run remediation regression tests
