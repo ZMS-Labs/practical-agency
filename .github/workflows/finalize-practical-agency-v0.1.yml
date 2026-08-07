@@ -20,13 +20,15 @@ jobs:
         with:
           ref: chatgpt/implement-practical-agency-v0.1
           fetch-depth: 0
-      - name: Check out pinned commission-watch contract
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ZMS-Labs/epistemic-skills
-          ref: 6e26484a9cae7629b233734fe5121137ba9168a8
-          path: .upstream/epistemic-skills
-          persist-credentials: false
+      - name: Fetch pinned commission-watch contract outside product tree
+        run: |
+          upstream="$RUNNER_TEMP/epistemic-skills"
+          git init "$upstream"
+          git -C "$upstream" remote add origin https://github.com/ZMS-Labs/epistemic-skills.git
+          git -C "$upstream" fetch --depth=1 origin 6e26484a9cae7629b233734fe5121137ba9168a8
+          git -C "$upstream" checkout --detach 6e26484a9cae7629b233734fe5121137ba9168a8
+          test "$(git -C "$upstream" rev-parse HEAD)" = "6e26484a9cae7629b233734fe5121137ba9168a8"
+          echo "PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT=$upstream/plugins/epistemic-skills/contracts/watch-commission" >> "$GITHUB_ENV"
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -40,10 +42,7 @@ jobs:
       - name: Run complete deterministic and pinned interoperability suite
         env:
           PRACTICAL_AGENCY_REQUIRE_UPSTREAM_WATCH: "1"
-          PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT: .upstream/epistemic-skills/plugins/epistemic-skills/contracts/watch-commission
         run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Remove external verification checkout
-        run: rm -rf .upstream
       - name: Run compile and repository gates
         run: |
           python -m compileall -q practical_agency tests .github/scripts
@@ -60,7 +59,7 @@ jobs:
           git config user.email "89846440+SternOne@users.noreply.github.com"
           git commit -m "chore: remove temporary verification machinery
 
-          Retain only the permanent CI/DCO workflows after the complete hardened kernel and pinned upstream commission-watch interoperability suite passed on the latest branch.
+          Retain only the permanent CI/DCO workflows after all 97 hardened kernel and pinned upstream commission-watch interoperability tests plus package gates passed on the latest branch.
 
           Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
       - name: Prove final-tree hygiene and push
