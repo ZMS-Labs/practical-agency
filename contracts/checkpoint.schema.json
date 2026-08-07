@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zms-labs.github.io/practical-agency/contracts/checkpoint.schema.json",
+  "title": "checkpoint-receipt@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mission_id", "revision", "path", "sha256", "created_at"],
+  "properties": {
+    "mission_id": { "type": "string", "minLength": 1 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "path": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+    "created_at": { "type": "string", "minLength": 1 }
+  }
+}
