@@ -17,6 +17,27 @@ class StateMachineTests(unittest.TestCase):
             MissionEvent("approve", "operator:test", {"checkpoint_ref": "checkpoint:1"}),
         )
 
+    def observed(self, manifest: MissionManifest) -> MissionManifest:
+        return apply_event(
+            manifest,
+            MissionEvent(
+                "record_observation",
+                "observer:test",
+                {
+                    "artifact_ref": "artifact:validator-pass",
+                    "fact": {"subject_ref": "repo:example@rev-1", "value": "validated"},
+                },
+            ),
+        )
+
+    def verdict(self, verdict: str, **extra: object) -> dict[str, object]:
+        return {
+            "verdict": verdict,
+            "evidence_refs": ["artifact:independent-review"],
+            "coverage_limits": ["fixture review only"],
+            **extra,
+        }
+
     def test_approve_increments_revision_and_preserves_instruction(self) -> None:
         before = self.draft()
         after = self.active()
@@ -54,26 +75,32 @@ class StateMachineTests(unittest.TestCase):
             MissionManifest.from_dict(payload),
             MissionEvent("approve", "operator:test", {"checkpoint_ref": "checkpoint:1"}),
         )
-        observed = apply_event(
-            active,
-            MissionEvent("record_observation", "observer:test", {"artifact_ref": "artifact:validator-pass"}),
-        )
+        observed = self.observed(active)
         verifying = apply_event(observed, MissionEvent("begin_verification", "mission-steward", {}))
         with self.assertRaisesRegex(TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"):
-            apply_event(verifying, MissionEvent("accept", "mission-steward", {"verdict": "PASS"}))
-        completed = apply_event(verifying, MissionEvent("accept", "reviewer:test", {"verdict": "PASS"}))
+            apply_event(
+                verifying,
+                MissionEvent("accept", "mission-steward", self.verdict("PASS")),
+            )
+        completed = apply_event(
+            verifying,
+            MissionEvent("accept", "reviewer:test", self.verdict("PASS")),
+        )
         self.assertEqual(completed.state["status"], "completed")
+        self.assertEqual(
+            completed.continuity["decisions"][-1]["evidence_refs"],
+            ["artifact:independent-review"],
+        )
 
-    def test_accept_requires_all_completion_proof_refs(self) -> None:
+    def test_begin_verification_requires_all_completion_proof_refs(self) -> None:
         payload = clone_payload()
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         active = apply_event(
             MissionManifest.from_dict(payload),
             MissionEvent("approve", "operator:test", {"checkpoint_ref": "checkpoint:1"}),
         )
-        verifying = apply_event(active, MissionEvent("begin_verification", "mission-steward", {}))
-        with self.assertRaisesRegex(TransitionError, "COMPLETION_PROOF_MISSING"):
-            apply_event(verifying, MissionEvent("accept", "reviewer:test", {"verdict": "PASS"}))
+        with self.assertRaisesRegex(TransitionError, "PROOF_BUNDLE_NOT_READY"):
+            apply_event(active, MissionEvent("begin_verification", "mission-steward", {}))
 
     def test_reject_cannot_be_rewritten_as_completion(self) -> None:
         payload = clone_payload()
@@ -82,10 +109,24 @@ class StateMachineTests(unittest.TestCase):
             MissionManifest.from_dict(payload),
             MissionEvent("approve", "operator:test", {"checkpoint_ref": "checkpoint:1"}),
         )
-        verifying = apply_event(active, MissionEvent("begin_verification", "mission-steward", {}))
-        rejected = apply_event(verifying, MissionEvent("reject", "reviewer:test", {"verdict": "FAIL", "reason": "wrong"}))
+        verifying = apply_event(
+            self.observed(active),
+            MissionEvent("begin_verification", "mission-steward", {}),
+        )
+        rejected = apply_event(
+            verifying,
+            MissionEvent(
+                "reject",
+                "reviewer:test",
+                self.verdict("FAIL", reason="wrong"),
+            ),
+        )
         self.assertNotEqual(rejected.state["status"], "completed")
         self.assertIn("FAIL:wrong", rejected.integrity["unresolved_verdicts"])
+        self.assertEqual(
+            rejected.continuity["decisions"][-1]["coverage_limits"],
+            ["fixture review only"],
+        )
 
 
 if __name__ == "__main__":
