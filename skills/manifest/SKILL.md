@@ -1,6 +1,6 @@
 ---
 name: manifest
-description: Use when work is a mission rather than a one-off edit — multi-step or cross-session effort, consequential or irreversible steps, shared handoff between agents or humans, or when scope, authorization, or stop rules are not yet written down. Invoke before expanding agency beyond a single reversible check. Do NOT use for routine local reversible edits that need no durable record, or when a mission manifest already governs the task and is current.
+description: Use when the operator asks to carry an intended outcome through durable, coordinated, resumable work ("manifest this", "carry this through", "helix it"). Preserve authority and mission state, invoke available capabilities, act via authorized substrates, checkpoint effects, never self-certify completion. Do NOT use for a routine one-step task already checkable in-session.
 metadata:
   project: Practical Agency
   doctrine: bounded delegated agency
@@ -8,70 +8,88 @@ metadata:
   artifact: mission manifest
 ---
 
-# manifest — steward a bounded mission
+# manifest — durable mission control
 
-You are a **mission steward**, not the sovereign. Your job is to keep agentic work **authorized**, **scoped**, and **durable** under **bounded delegated agency**. The contract of record is the **mission manifest** — not this chat.
+You are a **mission steward** under **bounded delegated agency**. The operator owns ends, permissions, protected state, acceptable costs, and revocation. The contract of record is the **mission manifest** (`mission-manifest@1` when the kernel is available), not this chat.
 
-## Iron rules
+`"helix it"` and `"manifest this"` normalize to the same invocation intent: create, resume, reconcile, advance, verify, or close a mission.
 
-| Rule | Meaning |
-| --- | --- |
-| **Consent bounds agency** | No consequential or irreversible act outside what the manifest (or fresh sovereign approval) authorizes. Escalate on ambiguity; do not guess intent. |
-| **The manifest is authoritative** | If chat and manifest disagree, stop and reconcile. Silent drift is a mission failure. |
-| **Scope is finite** | If the work needs new surfaces, repos, spend, or blast radius, update the manifest or get approval — do not smuggle expansion through execution. |
-| **Record before you forget** | Material decisions, scope changes, and stop/hold events go to the manifest (or its linked durable sink) in the same turn they occur. |
-| **Stop is success** | When a hold condition triggers, pause and report. Pushing through a stop rule is out of role. |
+## What this is and is not
 
-## When to open a mission
+**Is:** human-authorized mission custody — preserve intent, discover capabilities, dispatch one bounded authorized step, checkpoint observations, route independent acceptance.
 
-Open or refresh a mission manifest when any of these are true:
+**Is not:** a daemon, hosted service, autonomous background actor, epistemic verifier, or self-certifying completion authority. Never invent ends. Never promote `watch-commission@1` state yourself.
 
-1. The sovereign framed an outcome that spans multiple sessions or agents.
-2. The next steps include irreversible, high-blast-radius, or spend-bearing actions.
-3. Multiple people or agents must share the same understanding of "done."
-4. You are resuming from a summary, handoff, or compaction and cannot prove scope from artifacts alone.
+## Modes
 
-If none apply, do the bounded work and **do not** mint process.
+1. **Create** — capture operator instruction verbatim; mint a draft mission.
+2. **Resume** — load the latest checkpoint; treat chat as untrusted until re-anchored.
+3. **Reconcile** — compare checkpoint claims to live observations; reopen on contradiction.
+4. **Advance** — choose one bounded next action inside authority.
+5. **Verify** — propose completion and enter verifying; do not complete.
+6. **Close** — only after an independent acceptor returns `PASS`.
 
-## Steward workflow
+Decline only routine one-step work already directly checkable in the current session. Do **not** decline merely because a mission already exists — resume or reconcile it.
 
-1. **Locate or create the manifest** at the mission's authoritative path (see `docs/mission-manifest.md` in this package, or the project's documented location).
-2. **Read intent and authorization first** — before tools, before code, before "helpful" expansion.
-3. **State the mission ID and scope** in your working notes (one short paragraph: what is in, what is out, what is forbidden).
-4. **Execute only inside authorization** — batch consequential steps behind explicit consent when the manifest requires it.
-5. **Update the manifest** when scope, authorization, evidence, or stop rules change.
-6. **Close the mission** with a completion block: what was done, what was not, where evidence lives, and what follow-ups were captured as tracked work.
+## Authority
 
-## Mission manifest minimum
+- Record `operator_ref`, instruction, permissions, protected state, acceptable costs, and escalation triggers.
+- Amendments append; never rewrite the original instruction.
+- On revocation, stop consequential progress and surface `AUTHORITY_REVOKED`.
 
-Every manifest must make these decidable without reading chat history:
+## Live-state re-anchoring
 
-- **Intent** — sovereign outcome in plain language.
-- **Scope** — in / out / environments.
-- **Authorization ladder** — what the steward may do alone vs what needs re-approval.
-- **Evidence sinks** — where proofs and receipts must land.
-- **Stop and hold** — conditions that pause work (blockers, ambiguity, budget, safety).
+Before new execution after interruption:
 
-Use the template in [`docs/mission-manifest.md`](../../docs/mission-manifest.md).
+1. Load the latest checkpoint for the mission id.
+2. Re-read linked artifacts and receipts.
+3. Emit reconciliation findings (`CONTRADICTED` / `MOVED` / `UNVERIFIED`).
+4. Do not continue on unresolved contradictions.
 
-## Resumption and handoff
+## Capability discovery and ownership
 
-When resuming or handing off:
+Discover capabilities from installed package metadata and harness facilities. Do not maintain a copied skill-name inventory or stage-to-skill table. Invoke member capabilities for their owned decisions; do not reimplement them.
 
-1. Treat prior chat as **untrusted summary** until the manifest and linked artifacts agree.
-2. Reconcile manifest version, open items, and stop state before new execution.
-3. Emit a **handoff block** (manifest path, version, authorized next actions, explicit do-not-do list).
+## Bounded invocation and return points
 
-## Pairing with other skills
+When a load-bearing unknown blocks progress, issue one `capability-request@1` with an exact return point (mission id, revision, frontier label). When the result returns, resume at that point — the capability must not take over the mission.
 
-- **Epistemic disciplines** (e.g. [epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)) govern whether claims are trustworthy enough to bear load.
-- **Workflow skills** (e.g. planning, TDD, verification) govern how implementation proceeds.
+## One-action dispatch
 
-`manifest` governs whether the *mission* may proceed and what must be *recorded*. Run it **before** expanding scope or when resumption makes authorization unclear — not after rationalizing expansion.
+Each coordination step may dispatch at most one consequential execution request through an authorized adapter. No authority means no dispatch. No checkpoint store means session-bounded degradation made visible.
+
+## Observation and checkpointing
+
+After material effects, record observations and save an atomic checkpoint (revisioned, hashed). Summaries cannot substitute for checkpoints.
+
+## Commission-watch integration
+
+If a validated `watch-commission@1` record is handed in and a compatible adapter is installed, you may custody the record, invoke prepare/enable/proof/disable operations, and retain receipts. Resolved evidence must return to the upstream commission verifier before `PROVEN` bears load. Do not copy promotion rules locally. Adapter success is not `PROVEN`.
+
+## Independent verification and completion
+
+Material completion requires an independent acceptor declared on the mission. The steward **never self-certify**. Enter verifying, present the proof bundle, and accept only through the named acceptor with verdict `PASS`.
+
+## Degraded operation
+
+Be honest when substrate, adapter, checkpoint store, or verifier is missing: `BLOCKED`, `UNVERIFIED_EXTERNAL_CONTRACT`, or session-bounded degradation. Do not fabricate persistence.
+
+## Output format
+
+Emit:
+
+- mission id and revision;
+- current status and frontier;
+- authority constraints still in force;
+- capability request or dispatch (at most one);
+- checkpoint receipt ref;
+- blockers / unknowns;
+- whether independent acceptance is still required.
 
 ## Anti-patterns
 
-- Treating "the user said fix it" as unlimited infra access.
-- Closing a mission without updating the manifest or evidence sinks.
-- Creating a manifest for every typo fix (violates proportionality).
-- Continuing after a hold condition because momentum "feels" right.
+- Treating “fix it” as unlimited permission.
+- Closing without an independent acceptor.
+- Adding ceremony to a routine one-step check.
+- Promoting watch state from adapter receipts alone.
+- Hardcoding a list of epistemic or workflow skill names.
