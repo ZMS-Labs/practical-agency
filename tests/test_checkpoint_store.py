@@ -88,6 +88,23 @@ class CheckpointStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_PATH_MISMATCH"):
                 store.load(receipt)
 
+    def test_load_rejects_receipt_identity_that_escapes_store_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            store = FileCheckpointStore(root / "store")
+            outside = root / "external.r00000001.json"
+            outside.write_text("{}\n", encoding="utf-8")
+            mission_id = str(outside)[: -len(".r00000001.json")]
+            receipt = CheckpointReceipt(
+                mission_id=mission_id,
+                revision=1,
+                path=str(outside),
+                sha256=hashlib.sha256(outside.read_bytes()).hexdigest(),
+                created_at="2026-08-07T12:00:00Z",
+            )
+            with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_PATH_MISMATCH"):
+                store.load(receipt)
+
     def test_load_latest_rejects_filename_receipt_revision_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
