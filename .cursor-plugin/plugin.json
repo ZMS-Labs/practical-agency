@@ -1,7 +1,7 @@
 {
   "name": "practical-agency",
   "displayName": "Practical Agency",
-  "description": "Human-authorized mission control for durable agentic work — bounded delegated agency via the manifest skill and mission manifest artifact.",
+  "description": "Human-authorized mission control for durable agentic work — bounded delegated agency through the manifest skill and mission-manifest@1.",
   "version": "0.1.0",
   "author": {
     "name": "ZMS Labs",

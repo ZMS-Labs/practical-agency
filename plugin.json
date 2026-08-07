@@ -1,5 +1,7 @@
 {
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "practical-agency",
-  "description": "Human-authorized mission control for durable agentic work: a mission steward role under bounded delegated agency, centered on the mission manifest artifact."
+  "version": "0.1.0",
+  "description": "Human-authorized mission control for carrying intent through durable, coordinated, resumable action. Sole public skill: manifest.",
+  "skills": "./skills/"
 }

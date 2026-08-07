@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/capability-result@1",
+  "title": "capability-result@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "status", "artifact_refs", "observed_effects", "returned_control_point", "coverage_limits"],
+  "properties": {
+    "schema": {"const": "capability-result@1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["completed", "declined", "blocked", "failed"]},
+    "artifact_refs": {"type": "array", "items": {"type": "string"}},
+    "observed_effects": {"type": "array"},
+    "returned_control_point": {"type": "object"},
+    "coverage_limits": {"type": "array", "items": {"type": "string"}}
+  }
+}

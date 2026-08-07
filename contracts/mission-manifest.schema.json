@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/mission-manifest@1",
+  "title": "mission-manifest@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "mission_id",
+    "revision",
+    "authority",
+    "outcome",
+    "truth",
+    "state",
+    "capabilities",
+    "continuity",
+    "integrity"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mission-manifest@1"
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "authority": {
+      "$ref": "#/$defs/authority"
+    },
+    "outcome": {
+      "$ref": "#/$defs/outcome"
+    },
+    "truth": {
+      "$ref": "#/$defs/truth"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/capabilities"
+    },
+    "continuity": {
+      "$ref": "#/$defs/continuity"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "anyList": {
+      "type": "array"
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operator_ref",
+        "instruction",
+        "amendments",
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+        "revoked",
+        "revocation_reason"
+      ],
+      "properties": {
+        "operator_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "amendments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/amendment"
+          }
+        },
+        "permissions": {
+          "$ref": "#/$defs/stringList"
+        },
+        "protected_state": {
+          "$ref": "#/$defs/stringList"
+        },
+        "acceptable_costs": {
+          "$ref": "#/$defs/stringList"
+        },
+        "escalation_required_for": {
+          "$ref": "#/$defs/stringList"
+        },
+        "revoked": {
+          "type": "boolean"
+        },
+        "revocation_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "desired_state",
+        "completion_proof",
+        "integrity_guards",
+        "scope_proof",
+        "stop_conditions"
+      ],
+      "properties": {
+        "desired_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completion_proof": {
+          "$ref": "#/$defs/stringList"
+        },
+        "integrity_guards": {
+          "$ref": "#/$defs/stringList"
+        },
+        "scope_proof": {
+          "$ref": "#/$defs/stringList"
+        },
+        "stop_conditions": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "truth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject_refs",
+        "verified_facts",
+        "assumptions",
+        "contradictions",
+        "unknowns"
+      ],
+      "properties": {
+        "subject_refs": {
+          "$ref": "#/$defs/stringList"
+        },
+        "verified_facts": {
+          "$ref": "#/$defs/anyList"
+        },
+        "assumptions": {
+          "$ref": "#/$defs/anyList"
+        },
+        "contradictions": {
+          "$ref": "#/$defs/anyList"
+        },
+        "unknowns": {
+          "$ref": "#/$defs/anyList"
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "completed_actions",
+        "current_frontier",
+        "blockers",
+        "next_action"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "draft",
+            "active",
+            "paused",
+            "blocked",
+            "verifying",
+            "completed",
+            "cancelled"
+          ]
+        },
+        "completed_actions": {
+          "$ref": "#/$defs/anyList"
+        },
+        "current_frontier": {
+          "$ref": "#/$defs/stringList"
+        },
+        "blockers": {
+          "$ref": "#/$defs/anyList"
+        },
+        "next_action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovered_at",
+        "available",
+        "invoked",
+        "unavailable",
+        "degraded"
+      ],
+      "properties": {
+        "discovered_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "available": {
+          "$ref": "#/$defs/anyList"
+        },
+        "invoked": {
+          "$ref": "#/$defs/anyList"
+        },
+        "unavailable": {
+          "$ref": "#/$defs/anyList"
+        },
+        "degraded": {
+          "$ref": "#/$defs/anyList"
+        }
+      }
+    },
+    "continuity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prior_checkpoint",
+        "durable_artifacts",
+        "decisions",
+        "external_handoffs",
+        "watch_commissions"
+      ],
+      "properties": {
+        "prior_checkpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durable_artifacts": {
+          "$ref": "#/$defs/stringList"
+        },
+        "decisions": {
+          "$ref": "#/$defs/anyList"
+        },
+        "external_handoffs": {
+          "$ref": "#/$defs/anyList"
+        },
+        "watch_commissions": {
+          "$ref": "#/$defs/anyList"
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_may_self_accept",
+        "material_work_actors",
+        "required_gates",
+        "unresolved_verdicts",
+        "completion_acceptor",
+        "acceptance_receipt_ref"
+      ],
+      "properties": {
+        "actor_may_self_accept": {
+          "const": false
+        },
+        "material_work_actors": {
+          "$ref": "#/$defs/stringList"
+        },
+        "required_gates": {
+          "$ref": "#/$defs/stringList"
+        },
+        "unresolved_verdicts": {
+          "$ref": "#/$defs/anyList"
+        },
+        "completion_acceptor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "acceptance_receipt_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "instruction",
+        "authorized_by",
+        "authorization_ref",
+        "recorded_at"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorized_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorization_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recorded_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

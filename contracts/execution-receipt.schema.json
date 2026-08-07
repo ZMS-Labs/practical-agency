@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/execution-receipt@1",
+  "title": "execution-receipt@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "request_id", "adapter_ref", "status", "observed_effects", "artifact_refs", "recorded_at", "coverage_limits"],
+  "properties": {
+    "schema": {"const": "execution-receipt@1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "adapter_ref": {"type": "string", "minLength": 1},
+    "status": {"enum": ["completed", "blocked", "failed", "cancelled"]},
+    "observed_effects": {"type": "array"},
+    "artifact_refs": {"type": "array", "items": {"type": "string"}},
+    "recorded_at": {"type": "string", "minLength": 1},
+    "coverage_limits": {"type": "array", "items": {"type": "string"}}
+  }
+}

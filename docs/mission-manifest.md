@@ -1,102 +1,73 @@
-# Mission manifest — field guide (v0)
+# `mission-manifest@1` field guide
 
-The **mission manifest** is the durable artifact for [Practical Agency](https://github.com/ZMS-Labs/practical-agency). It binds **bounded delegated agency**: what a mission steward may do, where evidence goes, and when work must stop.
+The mission manifest is the durable contract of record for one authorized mission.
+It is not a prompt transcript, task list, or claim that a background agent exists.
 
-## Where it lives
+## Top-level sections
 
-Choose one authoritative path per mission and record it in the manifest header:
-
-- **Repo mission** — `docs/missions/<mission-id>.md` or `.missions/<mission-id>.md`
-- **Project mission** — `MISSION.md` at the project root (single active mission only)
-- **Fleet mission** — path declared in the controlling repo's governance docs
-
-Never fork the manifest across two locations. Link from chat; do not duplicate authority.
-
-## Template
-
-Copy and fill:
-
-```markdown
----
-mission_id: <kebab-case-id>
-status: draft | active | hold | complete | cancelled
-sovereign: <name or role>
-steward: <agent or team>
-opened: <ISO-8601 date>
-updated: <ISO-8601 date>
----
-
-# Mission: <short title>
-
-## Intent
-
-<What the sovereign wants — outcome, not task list.>
-
-## Scope
-
-### In
-
-- …
-
-### Out
-
-- …
-
-### Environments
-
-- …
-
-## Authorization
-
-| Class | Steward may | Requires re-approval |
-| --- | --- | --- |
-| Read / observe | … | … |
-| Reversible local edit | … | … |
-| Consequential / irreversible | … | always |
-
-## Evidence
-
-| Claim | Oracle / location |
+| Section | Purpose |
 | --- | --- |
-| Progress | … |
-| Completion | … |
+| `authority` | Operator identity, verbatim instruction, append-only amendments, permissions, protected state, acceptable costs, escalation rules, and revocation. |
+| `outcome` | Desired state, completion proof, integrity guards, scope proof, and stop conditions. |
+| `truth` | Subject references, verified facts, assumptions, contradictions, and unknowns. |
+| `state` | Closed lifecycle status, completed actions, current frontier, blockers, and one next action. |
+| `capabilities` | Current discovery results, bounded invocations, unavailable members, and visible degradation. |
+| `continuity` | Checkpoint lineage, durable artifacts, decisions, external handoffs, and commission records. |
+| `integrity` | Material-work actors, required gates, unresolved verdicts, and independent completion receipt. |
 
-## Stop and hold
+The semantic validator rejects unknown top-level and section fields so accidental
+schema drift cannot be interpreted optimistically.
 
-- **Hold if:** …
-- **Stop if:** …
-- **Escalate if:** …
+## Lifecycle
 
-## Log
-
-Reverse-chronological notes; material decisions only.
-
-- <date> — …
+```text
+draft -> active -> paused|blocked|verifying
+paused|blocked -> active
+verifying -> completed|active|blocked
+draft|active|paused|blocked|verifying -- operator revocation --> cancelled
+completed|cancelled -> terminal
 ```
 
-## Status semantics
+`completed` requires a receipted acceptor that is not listed among the material
+work actors. A live contradiction creates a new active revision; it does not
+rewrite the old checkpoint.
 
-| Status | Meaning |
-| --- | --- |
-| `draft` | Manifest under construction; no consequential execution. |
-| `active` | Steward may execute within authorization. |
-| `hold` | Blocked; steward must not expand scope until cleared. |
-| `complete` | Outcome accepted or explicitly abandoned with record. |
-| `cancelled` | Sovereign withdrew mission; no further execution. |
+## Authority
 
-## Completion block
+`authority.instruction` is immutable across normal revisions. Authorized changes
+are appended to `authority.amendments` with the new revision, operator identity,
+authorization reference, and time. Revocation requires the recorded operator, a
+durable authority reference, and a timestamp; it is the only route to
+`cancelled`.
 
-When closing, append:
+Permissions and acceptable costs are allowlists. Protected state is deny-before-
+action. Irreversible or explicitly escalated work requires fresh operator
+approval rather than inferred ambition.
 
-```markdown
-## Completion
+## Checkpoints
 
-- **Result:** …
-- **Evidence:** …
-- **Not done:** …
-- **Follow-ups:** …
-```
+A checkpoint contains the entire manifest plus events and receipts. Its canonical
+JSON bytes are SHA-256 addressed. The `LATEST` pointer is atomically replaced only
+after checkpoint bytes are durable. Loading verifies the pointer, checksum,
+identity, revision, and manifest semantics.
 
-## Versioning
+Conversation summaries may help locate a mission, but they cannot replace a
+verified checkpoint.
 
-Bump `updated` on every material edit. For long missions, consider git tags or manifest filename versioning (`mission-id-v2.md`) instead of silent overwrite.
+## Capability engagement
+
+Capabilities are discovered from current descriptors. Requests bind the mission
+revision, capability source hash, bounded question or action, expected output,
+stop condition, and exact return point. A result may complete, decline, block, or
+fail the bounded engagement; it cannot implicitly complete the entire mission.
+
+## External watches
+
+`continuity.watch_commissions` may retain an externally verified
+`watch-commission@1` record or a visible external-contract status. Practical
+Agency never promotes the upstream state itself. A real crossing may reopen the
+mission while the commission record's post-crossing diagnostic handoff remains
+separate.
+
+See `examples/minimal-mission.json` and
+`examples/watch-commission-mission.json` for complete carriers.
