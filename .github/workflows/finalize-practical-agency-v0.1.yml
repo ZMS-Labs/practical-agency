@@ -1,5 +1,5 @@
 name: finalize-practical-agency-v0.1
-# Rerun after the final README contract phrase was made contiguous.
+# Final rerun after both exact honest-limit phrases were made contiguous and lowercase.
 
 "on":
   push:
