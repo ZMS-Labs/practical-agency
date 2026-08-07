@@ -90,6 +90,10 @@ def _string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
+
+def _object_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, Mapping) for item in value)
+
 def _nullable_string(value: Any) -> bool:
     return value is None or isinstance(value, str)
 
@@ -225,6 +229,21 @@ def validate_manifest_dict(payload: Mapping[str, Any] | Any) -> list[str]:
                     "INVALID_STRING_LIST: continuity.durable_artifacts must be a list of strings"
                 )
 
+    object_list_fields = {
+        "truth": ("verified_facts", "assumptions", "contradictions", "unknowns"),
+        "capabilities": ("available", "invoked", "unavailable", "degraded"),
+        "continuity": ("decisions", "external_handoffs", "watch_commissions"),
+    }
+    for section, fields in object_list_fields.items():
+        value = payload.get(section)
+        if not isinstance(value, Mapping):
+            continue
+        for field in fields:
+            if not _object_list(value.get(field)):
+                errors.append(
+                    f"INVALID_OBJECT_LIST: {section}.{field} must contain objects"
+                )
+
     state = payload.get("state")
     status: str | None = None
     if isinstance(state, Mapping):
@@ -232,8 +251,10 @@ def validate_manifest_dict(payload: Mapping[str, Any] | Any) -> list[str]:
         if status not in {candidate.value for candidate in MissionStatus}:
             errors.append("INVALID_STATUS: state.status is outside the closed lifecycle")
         for field in ("completed_actions", "blockers"):
-            if not _list(state.get(field)):
-                errors.append(f"INVALID_STATE_LIST: state.{field} must be a list")
+            if not _object_list(state.get(field)):
+                errors.append(
+                    f"INVALID_OBJECT_LIST: state.{field} must contain objects"
+                )
         if not _string_list(state.get("current_frontier")):
             errors.append(
                 "INVALID_STRING_LIST: state.current_frontier must be a list of strings"
@@ -257,9 +278,9 @@ def validate_manifest_dict(payload: Mapping[str, Any] | Any) -> list[str]:
             errors.append(
                 "INVALID_STRING_LIST: integrity.required_gates must be a list of strings"
             )
-        if not _list(integrity.get("unresolved_verdicts")):
+        if not _object_list(integrity.get("unresolved_verdicts")):
             errors.append(
-                "INVALID_INTEGRITY_LIST: integrity.unresolved_verdicts must be a list"
+                "INVALID_OBJECT_LIST: integrity.unresolved_verdicts must contain objects"
             )
         for field in ("completion_acceptor", "acceptance_receipt_ref"):
             if not _nullable_string(integrity.get(field)):

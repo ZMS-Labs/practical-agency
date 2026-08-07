@@ -11,7 +11,12 @@ from practical_agency.capability_discovery import FileSystemSkillProvider
 from practical_agency.checkpoint_store import CheckpointStore
 from practical_agency.coordinator import CapabilityResult, MissionCoordinator
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.state_machine import TransitionError, reopen_for_contradiction, transition
+from practical_agency.state_machine import (
+    TransitionError,
+    record_reconciliation_observation,
+    reopen_for_contradiction,
+    transition,
+)
 from tests.helpers import minimal_payload
 
 
@@ -132,6 +137,7 @@ class EndToEndMissionTests(unittest.TestCase):
             reopened = reopen_for_contradiction(
                 resumed,
                 contradiction={
+                    "subject_ref": "artifact://output.txt",
                     "kind": "artifact-hash-mismatch",
                     "expected": expected_first_hash,
                     "observed": live_hash,
@@ -147,15 +153,23 @@ class EndToEndMissionTests(unittest.TestCase):
             )
             corrected, correction_receipt = coordinator.dispatch_one(
                 reopened,
-                action("repair", "repair example artifact"),
+                action("repair", "reconcile live-state contradiction"),
                 adapter=adapter,
                 actor_ref="steward:test",
             )
             expected_final_hash = hashlib.sha256(b"corrected\n").hexdigest()
             self.assertEqual(correction_receipt["observed_effects"][0]["sha256"], expected_final_hash)
 
-            verifying = coordinator.propose_verification(
+            reconciled = record_reconciliation_observation(
                 corrected,
+                subject_ref="artifact://output.txt",
+                observed_by="observer:test",
+                evidence_ref=f"artifact://output.txt@sha256:{expected_final_hash}",
+            )
+            store.save(reconciled, events=[{"kind": "live-state-reconciled"}])
+
+            verifying = coordinator.propose_verification(
+                reconciled,
                 actor_ref="steward:test",
                 proof_bundle_ref=f"proof://output.txt@sha256:{expected_final_hash}",
             )

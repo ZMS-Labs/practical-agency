@@ -70,6 +70,10 @@ class CheckpointStore:
 
     def _read_pointer(self, mission_dir: Path) -> dict[str, Any] | None:
         pointer_path = mission_dir / "LATEST"
+        if pointer_path.is_symlink():
+            raise CheckpointError(
+                "CHECKPOINT_SYMLINK_FORBIDDEN: LATEST pointer cannot be a symlink"
+            )
         if not pointer_path.exists():
             return None
         try:
@@ -189,6 +193,10 @@ class CheckpointStore:
         if pointer is None:
             raise CheckpointError("NO_CHECKPOINT: mission has no LATEST pointer")
         path = mission_dir / pointer["filename"]
+        if path.is_symlink():
+            raise CheckpointError(
+                "CHECKPOINT_SYMLINK_FORBIDDEN: checkpoint content cannot be a symlink"
+            )
         try:
             data = path.read_bytes()
         except OSError as error:

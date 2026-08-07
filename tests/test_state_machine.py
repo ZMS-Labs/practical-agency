@@ -110,12 +110,18 @@ class StateMachineTests(unittest.TestCase):
         )
         reopened = reopen_for_contradiction(
             completed,
-            contradiction={"claim": "artifact hash", "observed": "changed"},
+            contradiction={
+                "subject_ref": "artifact://canonical",
+                "claim": "artifact hash",
+                "observed": "changed",
+            },
             observed_by="observer:test",
             evidence_ref="observation:test",
         )
         self.assertEqual(reopened.state["status"], "active")
         self.assertTrue(reopened.truth["contradictions"])
+        self.assertTrue(reopened.state["blockers"])
+        self.assertTrue(reopened.integrity["unresolved_verdicts"])
         self.assertIsNone(reopened.integrity["completion_acceptor"])
 
     def test_generic_transition_cannot_cancel_without_operator_revocation(self) -> None:
