@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zms-labs.github.io/practical-agency/contracts/mission-event.schema.json",
+  "title": "mission-event@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "actor_ref"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "pause",
+        "resume",
+        "block",
+        "unblock",
+        "begin_verification",
+        "accept",
+        "reject",
+        "revoke",
+        "cancel",
+        "record_action",
+        "record_observation",
+        "amend_authority"
+      ]
+    },
+    "actor_ref": { "type": "string", "minLength": 1 },
+    "detail": { "type": "object" },
+    "artifact_refs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "verdict": {
+      "type": ["string", "null"],
+      "enum": ["PASS", "FAIL", "INCONCLUSIVE", null]
+    }
+  }
+}
