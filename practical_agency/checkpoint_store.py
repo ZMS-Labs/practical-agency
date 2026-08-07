@@ -6,16 +6,30 @@ import json
 import os
 import re
 import tempfile
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
-from practical_agency.manifest_model import MissionManifest
+from practical_agency.manifest_model import MissionManifest, MissionStatus
 
 
 class CheckpointError(RuntimeError):
     """Named checkpoint integrity or storage failure."""
+
+
+_RECEIPT_FIELDS = {
+    "schema",
+    "mission_id",
+    "revision",
+    "path",
+    "sha256",
+    "created_at",
+}
+_MISSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_RECONCILIATION_CLASSES = {"CONTRADICTED", "MOVED", "UNVERIFIED"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,21 +45,37 @@ class CheckpointReceipt:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "CheckpointReceipt":
+        if set(payload) != _RECEIPT_FIELDS:
+            raise CheckpointError("INVALID_CHECKPOINT_RECEIPT: unexpected or missing fields")
         if payload.get("schema") != "checkpoint-receipt@1":
-            raise CheckpointError("INVALID_CHECKPOINT_RECEIPT")
-        try:
-            revision = payload["revision"]
-            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
-                raise ValueError("revision must be a positive integer")
-            return cls(
-                mission_id=str(payload["mission_id"]),
-                revision=revision,
-                path=str(payload["path"]),
-                sha256=str(payload["sha256"]),
-                created_at=str(payload["created_at"]),
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise CheckpointError(f"INVALID_CHECKPOINT_RECEIPT:{error}") from error
+            raise CheckpointError("INVALID_CHECKPOINT_RECEIPT: invalid schema")
+
+        mission_id = payload.get("mission_id")
+        revision = payload.get("revision")
+        path = payload.get("path")
+        sha256 = payload.get("sha256")
+        created_at = payload.get("created_at")
+        if (
+            not isinstance(mission_id, str)
+            or not _MISSION_ID.fullmatch(mission_id)
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+            or not isinstance(path, str)
+            or not path.strip()
+            or not isinstance(sha256, str)
+            or not _SHA256.fullmatch(sha256)
+            or not isinstance(created_at, str)
+            or not created_at.strip()
+        ):
+            raise CheckpointError("INVALID_CHECKPOINT_RECEIPT: invalid field type or value")
+        return cls(
+            mission_id=mission_id,
+            revision=revision,
+            path=path,
+            sha256=sha256,
+            created_at=created_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +135,8 @@ class FileCheckpointStore:
         data_path = self._data_path(manifest.mission_id, manifest.revision)
         receipt_path = self._receipt_path(manifest.mission_id, manifest.revision)
 
+        if data_path.is_symlink() or receipt_path.is_symlink():
+            raise CheckpointError("CHECKPOINT_PATH_SYMLINK")
         if data_path.exists():
             if data_path.read_bytes() != data:
                 raise CheckpointError("CHECKPOINT_REVISION_COLLISION")
@@ -132,13 +164,18 @@ class FileCheckpointStore:
         return receipt
 
     def load(self, receipt: CheckpointReceipt) -> MissionManifest:
-        path = Path(receipt.path).resolve()
+        supplied_path = Path(receipt.path)
+        expected_raw = self._data_path(receipt.mission_id, receipt.revision)
+        if supplied_path.is_symlink() or expected_raw.is_symlink():
+            raise CheckpointError("CHECKPOINT_PATH_SYMLINK")
+
         root_path = self.root.resolve()
-        expected_path = self._data_path(receipt.mission_id, receipt.revision).resolve()
+        expected_path = expected_raw.resolve()
         try:
             expected_path.relative_to(root_path)
         except ValueError as error:
             raise CheckpointError("CHECKPOINT_PATH_MISMATCH") from error
+        path = supplied_path.resolve()
         if path != expected_path:
             raise CheckpointError("CHECKPOINT_PATH_MISMATCH")
         try:
@@ -165,6 +202,8 @@ class FileCheckpointStore:
     def load_latest(
         self, mission_id: str
     ) -> tuple[MissionManifest, CheckpointReceipt] | None:
+        if not _MISSION_ID.fullmatch(mission_id):
+            raise CheckpointError("INVALID_MISSION_ID")
         pattern = re.compile(
             rf"^{re.escape(mission_id)}\.r(?P<revision>\d{{8}})\.receipt\.json$"
         )
@@ -172,6 +211,8 @@ class FileCheckpointStore:
         for path in self.root.iterdir():
             match = pattern.match(path.name)
             if match:
+                if path.is_symlink():
+                    raise CheckpointError("CHECKPOINT_RECEIPT_SYMLINK")
                 candidates.append((int(match.group("revision")), path))
         if not candidates:
             return None
@@ -214,3 +255,88 @@ def reconcile_observations(
                 )
             )
     return findings
+
+
+def apply_reconciliation_findings(
+    manifest: MissionManifest,
+    findings: Sequence[ReconciliationFinding],
+) -> MissionManifest:
+    """Reopen a mission and invalidate load-bearing proof for live-state drift.
+
+    The checkpoint store does not decide whether the live observation is correct;
+    it records the contradiction as unresolved and removes prior completion/gate
+    artifacts from the set permitted to bear load. A fresh observation must clear
+    the reconciliation blocker through the state machine.
+    """
+
+    if not findings:
+        return manifest
+    data = manifest.to_dict()
+    truth = data["truth"]
+    state = data["state"]
+    integrity = data["integrity"]
+    continuity = data["continuity"]
+    subjects: list[str] = []
+
+    for finding in findings:
+        if (
+            not isinstance(finding.subject_ref, str)
+            or not finding.subject_ref.strip()
+            or finding.classification not in _RECONCILIATION_CLASSES
+        ):
+            raise CheckpointError("INVALID_RECONCILIATION_FINDING")
+        subject_ref = finding.subject_ref
+        subjects.append(subject_ref)
+        truth["verified_facts"] = [
+            fact
+            for fact in truth["verified_facts"]
+            if not (
+                isinstance(fact, Mapping)
+                and fact.get("subject_ref") == subject_ref
+            )
+        ]
+        evidence = {
+            "subject_ref": subject_ref,
+            "checkpoint_value": deepcopy(finding.checkpoint_value),
+            "live_value": deepcopy(finding.live_value),
+            "classification": finding.classification,
+        }
+        target = (
+            truth["unknowns"]
+            if finding.classification == "UNVERIFIED"
+            else truth["contradictions"]
+        )
+        if evidence not in target:
+            target.append(evidence)
+        marker = f"RECONCILIATION:{finding.classification}:{subject_ref}"
+        if marker not in state["blockers"]:
+            state["blockers"].append(marker)
+        if marker not in integrity["unresolved_verdicts"]:
+            integrity["unresolved_verdicts"].append(marker)
+
+    invalidated = set(data["outcome"]["completion_proof"]) | set(
+        integrity["required_gates"]
+    )
+    continuity["durable_artifacts"] = [
+        ref for ref in continuity["durable_artifacts"] if ref not in invalidated
+    ]
+    continuity["decisions"].append(
+        {
+            "kind": "live-state-reconciliation",
+            "findings": [
+                {
+                    "subject_ref": item.subject_ref,
+                    "checkpoint_value": deepcopy(item.checkpoint_value),
+                    "live_value": deepcopy(item.live_value),
+                    "classification": item.classification,
+                }
+                for item in findings
+            ],
+            "invalidated_artifact_refs": sorted(invalidated),
+        }
+    )
+    if state["status"] != MissionStatus.CANCELLED.value:
+        state["status"] = MissionStatus.BLOCKED.value
+        state["next_action"] = "re-establish live proof for " + ", ".join(subjects)
+    data["revision"] = manifest.revision + 1
+    return MissionManifest.from_dict(data)
