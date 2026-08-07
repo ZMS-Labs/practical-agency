@@ -24,17 +24,13 @@ Licensed under [GPL-3.0-or-later](LICENSE).
 
 ## Current status
 
-The checked-in `0.1.0` metadata describes an **unreleased seed**: a portable
-authorization-and-recording skill plus package identity. It is **not** yet a
-deterministic mission kernel. Do not treat repository existence, package
-installation, or adapter success as proof that a durable mission driver or live
-observer is running.
-
-At every stage Practical Agency remains:
-
-- not a daemon;
-- not a hosted service;
-- not an autonomous background actor.
+`0.1.0` remains an **unreleased** version. This branch adds a stdlib
+deterministic mission kernel (`mission-manifest@1`, authority/transitions,
+atomic checkpoints, dynamic capability discovery, bounded coordinator) and
+upgrades the sole public `manifest` skill. It is still **not** a production
+runtime: no daemon, hosted service, autonomous background actor, or production
+execution adapter is claimed. Live harness loading and comparative efficacy
+remain unverified until exercised per harness.
 
 ## What this is
 
@@ -111,6 +107,12 @@ with a compatible adapter; it must not promote commission state itself.
 python -m unittest discover -s tests -p 'test_*.py' -v
 python -m compileall -q practical_agency tests
 ```
+
+Deterministic mission custody is proven by the in-process end-to-end fixture.
+No production external execution adapter is included yet. No background service
+is claimed. Live harness loading is unverified until tested in each packaged
+harness. End-to-end mission benefit over an ordinary skilled agent remains
+unestablished until comparative evaluation exists.
 
 Follow the [DCO](https://developercertificate.org/) sign-off on commits
 (`Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>` for
