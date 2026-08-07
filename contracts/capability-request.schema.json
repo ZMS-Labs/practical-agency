@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/capability-request@1",
+  "title": "capability-request@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "mission_id",
+    "mission_revision",
+    "capability_id",
+    "capability_source_sha256",
+    "bounded_question_or_action",
+    "authority_receipt",
+    "expected_output_contract",
+    "return_point",
+    "timeout_or_stop_condition"
+  ],
+  "properties": {
+    "schema": {
+      "const": "capability-request@1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "capability_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capability_source_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bounded_question_or_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority_receipt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_output_contract": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "return_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mission_id",
+        "revision",
+        "frontier_index",
+        "label"
+      ],
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frontier_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "timeout_or_stop_condition": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zms-practical-agency"
+version = "0.1.0"
+description = "Human-authorized mission control for durable agentic work"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+authors = [{ name = "ZMS Labs" }]
+dependencies = []
+keywords = ["agent-skills", "mission-control", "delegation", "authorization"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
+
+[tool.setuptools.packages.find]
+include = ["practical_agency*"]

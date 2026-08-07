@@ -1,0 +1,115 @@
+{
+  "schema": "mission-manifest@1",
+  "mission_id": "commission-disk-space-alert",
+  "revision": 1,
+  "authority": {
+    "operator_ref": "operator:test",
+    "instruction": "Commission and prove an external disk-space alert without claiming that this session remains active.",
+    "amendments": [],
+    "permissions": [
+      "repository:write"
+    ],
+    "protected_state": [
+      "unrelated files"
+    ],
+    "acceptable_costs": [
+      "one feature branch"
+    ],
+    "escalation_required_for": [
+      "destructive action"
+    ],
+    "revoked": false,
+    "revocation_reason": null
+  },
+  "outcome": {
+    "desired_state": "A real external observer detects free space below 15 percent and alerts an authorized recipient.",
+    "completion_proof": [
+      "artifact:watch-commission-proven"
+    ],
+    "integrity_guards": [
+      "upstream semantic verifier accepts the commission"
+    ],
+    "scope_proof": [
+      "only the declared fixture subject and adapter are touched"
+    ],
+    "stop_conditions": [
+      "no safe proof crossing exists"
+    ]
+  },
+  "truth": {
+    "subject_refs": [
+      "subject:example-disk"
+    ],
+    "verified_facts": [],
+    "assumptions": [],
+    "contradictions": [],
+    "unknowns": []
+  },
+  "state": {
+    "status": "draft",
+    "completed_actions": [],
+    "current_frontier": [
+      "obtain an external execution substrate"
+    ],
+    "blockers": [],
+    "next_action": "obtain an external execution substrate"
+  },
+  "capabilities": {
+    "discovered_at": null,
+    "available": [],
+    "invoked": [],
+    "unavailable": [],
+    "degraded": []
+  },
+  "continuity": {
+    "prior_checkpoint": null,
+    "durable_artifacts": [],
+    "decisions": [],
+    "external_handoffs": [],
+    "watch_commissions": [
+      {
+        "schema": "watch-commission@1",
+        "commission_id": "wc-disk-001",
+        "state": "BLOCKED",
+        "block_reason": "NO_EXECUTION_SUBSTRATE",
+        "block_evidence": {
+          "detail": "no persistent provider is available in the current harness",
+          "observed_at": "2026-08-07T12:00:00Z",
+          "receipt_ref": "external-discovery://no-substrate/1"
+        },
+        "external_observer": {
+          "substrate_kind": null,
+          "substrate": null,
+          "mechanism_ref": null,
+          "persistence_receipt_ref": null,
+          "persistent_outside_session": false,
+          "enabled": false
+        },
+        "kill_switch": {
+          "procedure_ref": null,
+          "exercised": false,
+          "exercise_receipt_ref": null
+        },
+        "proof": {
+          "authorized_by": null,
+          "authorization_ref": null,
+          "safe_crossing": null,
+          "production_path": false,
+          "bound_crossed": false,
+          "alert_received": false,
+          "received_at": null,
+          "alert_receipt_ref": null
+        },
+        "coverage_limits": [
+          "no production observer has been commissioned"
+        ]
+      }
+    ]
+  },
+  "integrity": {
+    "actor_may_self_accept": false,
+    "required_gates": [],
+    "unresolved_verdicts": [],
+    "completion_acceptor": null
+  }
+}

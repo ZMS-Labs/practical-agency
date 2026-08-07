@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/mission-event@1",
+  "title": "mission-event@1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "mission_id",
+    "expected_revision",
+    "kind",
+    "actor_ref",
+    "data",
+    "observed_at"
+  ],
+  "properties": {
+    "schema": {
+      "const": "mission-event@1"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "enum": [
+        "approve",
+        "pause",
+        "resume",
+        "block",
+        "unblock",
+        "begin_verification",
+        "accept",
+        "reject",
+        "revoke",
+        "cancel",
+        "record_action",
+        "record_observation",
+        "amend_authority"
+      ]
+    },
+    "actor_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data": {
+      "type": "object",
+      "x-practical-agency-open": true
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
