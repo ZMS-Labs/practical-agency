@@ -53,7 +53,7 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/practical-agency-wheelhouse /tmp/practical-agency-wheel-target
           mkdir -p /tmp/practical-agency-wheelhouse /tmp/practical-agency-wheel-target
-          python -m pip wheel --no-deps --no-build-isolation --wheel-dir /tmp/practical-agency-wheelhouse .
+          python -m pip wheel --no-deps --wheel-dir /tmp/practical-agency-wheelhouse .
           python -m pip install --no-deps --target /tmp/practical-agency-wheel-target /tmp/practical-agency-wheelhouse/*.whl
           (
             cd /tmp
