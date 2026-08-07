@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+
+from practical_agency.capability_discovery import CapabilityDescriptor, Persistence
+from practical_agency.checkpoint_store import FileCheckpointStore
+from practical_agency.coordinator import (
+    CoordinationError,
+    apply_capability_result,
+    coordinate_once,
+    dispatch_once,
+    normalize_invocation_intent,
+)
+from practical_agency.manifest_model import MissionManifest
+from tests.helpers import clone_payload
+
+
+class MemoryAdapter:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(request)
+        return {"status": "completed", "artifact_ref": "artifact:one", "observed_effects": []}
+
+
+def capability(availability: str = "available") -> CapabilityDescriptor:
+    return CapabilityDescriptor(
+        capability_id="fixture",
+        kind="skill",
+        source_ref="fixture://skill",
+        source_sha256="a" * 64,
+        description="Use for the bounded fixture question.",
+        input_contract=None,
+        output_contract=None,
+        authority_required=("repository:read",),
+        persistence=Persistence.SESSION,
+        independence="actor",
+        availability=availability,
+        degradation_reason=None if availability == "available" else "NOT_LOADED",
+    )
+
+
+class CoordinatorTests(unittest.TestCase):
+    def active(self) -> MissionManifest:
+        payload = clone_payload()
+        payload["revision"] = 2
+        payload["state"]["status"] = "active"
+        payload["continuity"]["prior_checkpoint"] = "checkpoint:1"
+        return MissionManifest.from_dict(payload)
+
+    def test_routine_direct_action_does_not_manufacture_epistemic_request(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write one artifact",
+            },
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "DISPATCH")
+
+    def test_unresolved_claim_requests_capability_and_preserves_return_point(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            unresolved_condition="Which revision bears load?",
+            selected_capability=capability(),
+            frontier_index=3,
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "REQUEST_CAPABILITY")
+        self.assertEqual(decision.return_point.frontier_index, 3)
+        self.assertEqual(decision.request["capability_id"], "fixture")
+
+    def test_unavailable_capability_becomes_visible_block(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            unresolved_condition="Need evidence",
+            selected_capability=capability("unavailable"),
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "BLOCK")
+        self.assertIn("NOT_LOADED", decision.reason)
+
+    def test_one_decision_dispatches_at_most_once(self) -> None:
+        adapter = MemoryAdapter()
+        decision = coordinate_once(
+            self.active(),
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=object(),
+        )
+        dispatch_once(self.active(), decision, adapter)
+        self.assertEqual(len(adapter.calls), 1)
+
+    def test_no_authority_means_no_dispatch(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["network:write"],
+                "requested_effects": [],
+                "estimated_costs": [],
+                "action": "write network",
+            },
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "BLOCK")
+        self.assertIn("PERMISSION_NOT_GRANTED", decision.reason)
+
+    def test_missing_store_is_visible_session_only_degradation(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=None,
+        )
+        self.assertEqual(decision.kind, "DISPATCH")
+        self.assertIn("SESSION_BOUNDED", decision.reason)
+
+    def test_completion_proposal_enters_verify_not_complete(self) -> None:
+        decision = coordinate_once(self.active(), completion_proposed=True, checkpoint_store=object())
+        self.assertEqual(decision.kind, "VERIFY")
+
+    def test_capability_result_returns_to_exact_point(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            unresolved_condition="Need evidence",
+            selected_capability=capability(),
+            frontier_index=2,
+            checkpoint_store=object(),
+        )
+        updated = apply_capability_result(
+            self.active(),
+            decision,
+            {"status": "completed", "returned_control_point": decision.return_point.to_dict(), "artifact_refs": ["artifact:x"]},
+        )
+        self.assertEqual(updated.state["next_action"], decision.return_point.label)
+        self.assertIn("artifact:x", updated.continuity["durable_artifacts"])
+
+    def test_no_go_result_is_not_rewritten(self) -> None:
+        decision = coordinate_once(
+            self.active(), unresolved_condition="Gate", selected_capability=capability(), checkpoint_store=object()
+        )
+        updated = apply_capability_result(
+            self.active(),
+            decision,
+            {
+                "status": "completed",
+                "verdict": "NO-GO",
+                "returned_control_point": decision.return_point.to_dict(),
+                "artifact_refs": [],
+            },
+        )
+        self.assertEqual(updated.state["status"], "blocked")
+        self.assertIn("NO-GO", updated.integrity["unresolved_verdicts"])
+
+    def test_wrong_return_point_is_rejected(self) -> None:
+        decision = coordinate_once(
+            self.active(), unresolved_condition="Gate", selected_capability=capability(), checkpoint_store=object()
+        )
+        with self.assertRaisesRegex(CoordinationError, "RETURN_POINT_MISMATCH"):
+            apply_capability_result(
+                self.active(),
+                decision,
+                {"status": "completed", "returned_control_point": {"mission_id": "other"}, "artifact_refs": []},
+            )
+
+    def test_helix_and_manifest_phrases_normalize_to_same_intent(self) -> None:
+        self.assertEqual(normalize_invocation_intent("helix it"), "manifest")
+        self.assertEqual(normalize_invocation_intent("manifest this"), "manifest")
+
+
+if __name__ == "__main__":
+    unittest.main()
