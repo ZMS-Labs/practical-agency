@@ -165,7 +165,7 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
         errors.append("OPERATOR_REQUIRED: authority.operator_ref must be non-empty")
     if not _nonempty_string(authority.get("instruction")):
         errors.append("INSTRUCTION_REQUIRED: authority.instruction must be non-empty")
-    if authority.get("revoked") not in (True, False):
+    if not isinstance(authority.get("revoked"), bool):
         errors.append("INVALID_REVOCATION_FLAG: authority.revoked must be boolean")
     if authority.get("revoked") is True and not _nonempty_string(
         authority.get("revocation_reason")
