@@ -26,7 +26,20 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply the structure-aware integrity implementation
-        run: python .github/scripts/apply_independent_integrity.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_independent_integrity.py')
+          text = path.read_text(encoding='utf-8')
+          old = '            "truth.verified_facts",\n'
+          new = '            "object_list_fields",\n'
+          if text.count(old) != 1:
+              raise SystemExit('integrity helper self-check anchor drifted')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python .github/scripts/apply_independent_integrity.py
       - name: Run the imported independent integrity corpus
         run: python -m unittest tests.test_concurrent_review_invariants -v
       - name: Run affected lifecycle and end-to-end tests
