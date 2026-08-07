@@ -3,6 +3,10 @@
 Status: **candidate / unreleased**. Do not tag until independent review and
 per-harness loading evidence close.
 
+Frozen tip under review: `57f37ce39562be13ab59aa0c11d97e26163310f4`  
+Deterministic receipt: [`VERIFICATION-0.1.0-candidate.md`](./VERIFICATION-0.1.0-candidate.md)  
+Degraded Gauntlet: [`../gauntlet-runs/practical-agency-0.1.0-candidate-2026-08-07/`](../gauntlet-runs/practical-agency-0.1.0-candidate-2026-08-07/) — verdict **CONDITIONAL**
+
 ## PROVEN
 
 - `mission-manifest@1` structural schema + semantic validator
