@@ -133,7 +133,12 @@ class FileCheckpointStore:
 
     def load(self, receipt: CheckpointReceipt) -> MissionManifest:
         path = Path(receipt.path).resolve()
+        root_path = self.root.resolve()
         expected_path = self._data_path(receipt.mission_id, receipt.revision).resolve()
+        try:
+            expected_path.relative_to(root_path)
+        except ValueError as error:
+            raise CheckpointError("CHECKPOINT_PATH_MISMATCH") from error
         if path != expected_path:
             raise CheckpointError("CHECKPOINT_PATH_MISMATCH")
         try:
