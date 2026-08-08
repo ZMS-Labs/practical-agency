@@ -1,21 +1,29 @@
-"""Closed mission-event transition table for mission-manifest@1."""
-
+"""Closed, authority-preserving mission-state transitions."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from practical_agency.manifest_model import MissionManifest, MissionStatus
-from practical_agency.validation import validate_manifest_dict
 
-STEWARD_REF = "mission-steward"
 
-LEGAL_TRANSITIONS: dict[str, set[str]] = {
+class TransitionError(RuntimeError):
+    """Named refusal for an invalid mission transition."""
+
+
+@dataclass(frozen=True, slots=True)
+class MissionEvent:
+    kind: str
+    actor_ref: str
+    data: Mapping[str, Any] = field(default_factory=dict)
+
+
+_ALLOWED_FROM: dict[str, set[str]] = {
     "approve": {MissionStatus.DRAFT.value},
-    "pause": {MissionStatus.ACTIVE.value, MissionStatus.VERIFYING.value},
+    "pause": {MissionStatus.ACTIVE.value},
     "resume": {MissionStatus.PAUSED.value},
     "block": {
-        MissionStatus.DRAFT.value,
         MissionStatus.ACTIVE.value,
         MissionStatus.PAUSED.value,
         MissionStatus.VERIFYING.value,
@@ -38,186 +46,338 @@ LEGAL_TRANSITIONS: dict[str, set[str]] = {
         MissionStatus.BLOCKED.value,
         MissionStatus.VERIFYING.value,
     },
-    "record_action": {
-        MissionStatus.ACTIVE.value,
-        MissionStatus.VERIFYING.value,
-    },
+    "record_action": {MissionStatus.ACTIVE.value},
     "record_observation": {
         MissionStatus.ACTIVE.value,
-        MissionStatus.PAUSED.value,
         MissionStatus.BLOCKED.value,
-        MissionStatus.VERIFYING.value,
     },
     "amend_authority": {
         MissionStatus.DRAFT.value,
         MissionStatus.ACTIVE.value,
         MissionStatus.PAUSED.value,
         MissionStatus.BLOCKED.value,
-        MissionStatus.VERIFYING.value,
     },
 }
 
 
-class TransitionError(ValueError):
-    """Named refusal for an illegal or unauthorized mission transition."""
+def _required_string(data: Mapping[str, Any], key: str, code: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise TransitionError(code)
+    return value
 
 
-@dataclass(frozen=True, slots=True)
-class MissionEvent:
-    kind: str
-    actor_ref: str
-    detail: Mapping[str, Any] | None = None
-    artifact_refs: tuple[str, ...] | list[str] = ()
-    verdict: str | None = None
+def _string_list(
+    data: Mapping[str, Any], key: str, code: str, *, non_empty: bool = False
+) -> list[str]:
+    value = data.get(key)
+    if (
+        not isinstance(value, list)
+        or (non_empty and not value)
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        raise TransitionError(code)
+    return list(value)
 
 
-def _clone(manifest: MissionManifest) -> dict[str, Any]:
-    return manifest.to_dict()
+def _operator_only(manifest: MissionManifest, event: MissionEvent) -> None:
+    if event.actor_ref != manifest.authority.get("operator_ref"):
+        raise TransitionError("OPERATOR_AUTHORITY_REQUIRED")
+
+
+def _append_unique(target: list[Any], value: Any) -> None:
+    if value not in target:
+        target.append(deepcopy(value))
+
+
+def _material_workers(data: Mapping[str, Any]) -> set[str]:
+    workers: set[str] = set()
+    decisions = data.get("continuity", {}).get("decisions", [])
+    for item in decisions:
+        if isinstance(item, Mapping) and item.get("kind") == "material-action":
+            actor = item.get("actor_ref")
+            if isinstance(actor, str):
+                workers.add(actor)
+    return workers
+
+
+def _require_independent_acceptor(
+    data: Mapping[str, Any], event: MissionEvent
+) -> None:
+    acceptor = data.get("integrity", {}).get("completion_acceptor")
+    if event.actor_ref != acceptor or event.actor_ref in _material_workers(data):
+        raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
+
+
+def _required_proof_refs(data: Mapping[str, Any]) -> list[str]:
+    return list(data["outcome"]["completion_proof"]) + list(
+        data["integrity"]["required_gates"]
+    )
+
+
+def _missing_proof_refs(data: Mapping[str, Any]) -> list[str]:
+    present = set(data["continuity"]["durable_artifacts"])
+    return [ref for ref in _required_proof_refs(data) if ref not in present]
+
+
+def _acceptance_evidence(payload: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    evidence_refs = _string_list(
+        payload, "evidence_refs", "ACCEPTANCE_EVIDENCE_REQUIRED", non_empty=True
+    )
+    coverage_limits = _string_list(
+        payload, "coverage_limits", "ACCEPTANCE_COVERAGE_LIMITS_REQUIRED"
+    )
+    return evidence_refs, coverage_limits
+
+
+def _reconciliation_subject(marker: object) -> str | None:
+    if not isinstance(marker, str) or not marker.startswith("RECONCILIATION:"):
+        return None
+    parts = marker.split(":", 2)
+    return parts[2] if len(parts) == 3 and parts[2] else None
 
 
 def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManifest:
-    status = str(manifest.state.get("status"))
-    kind = event.kind
-    if kind not in LEGAL_TRANSITIONS:
-        raise TransitionError(f"UNKNOWN_EVENT: {kind}")
+    if event.kind not in _ALLOWED_FROM:
+        raise TransitionError(f"UNKNOWN_EVENT:{event.kind}")
 
-    progress_kinds = {
-        "record_action",
-        "begin_verification",
-        "accept",
-        "approve",
-        "resume",
-        "unblock",
-        "amend_authority",
-        "pause",
-        "block",
-    }
-    if manifest.authority.get("revoked") is True and kind in progress_kinds:
-        raise TransitionError("AUTHORITY_REVOKED: no further mission progress is permitted")
+    current = manifest.state.get("status")
+    if manifest.authority.get("revoked") is True and event.kind not in {"cancel"}:
+        raise TransitionError("AUTHORITY_REVOKED")
+    if current not in _ALLOWED_FROM[event.kind]:
+        raise TransitionError(f"INVALID_TRANSITION:{current}->{event.kind}")
 
-    if status not in LEGAL_TRANSITIONS[kind]:
-        raise TransitionError(f"ILLEGAL_TRANSITION: {kind} from {status}")
+    original_instruction = manifest.authority.get("instruction")
+    data = manifest.to_dict()
+    payload = deepcopy(dict(event.data))
+    state = data["state"]
+    authority = data["authority"]
+    continuity = data["continuity"]
+    integrity = data["integrity"]
 
-    payload = _clone(manifest)
-    payload["revision"] = int(manifest.revision) + 1
-    authority = payload["authority"]
-    state = payload["state"]
-    continuity = payload["continuity"]
-    integrity = payload["integrity"]
-    detail = dict(event.detail or {})
-    artifacts = list(event.artifact_refs or [])
-    # After the first revision, trusted progress must cite a prior checkpoint ref.
-    if payload["revision"] > 1 and continuity.get("prior_checkpoint") is None:
-        continuity["prior_checkpoint"] = (
-            f"checkpoint://{manifest.mission_id}/{manifest.revision:04d}"
+    if event.kind == "approve":
+        _operator_only(manifest, event)
+        checkpoint_ref = _required_string(
+            payload, "checkpoint_ref", "CHECKPOINT_REQUIRED_FOR_APPROVAL"
         )
+        continuity["prior_checkpoint"] = checkpoint_ref
+        state["status"] = MissionStatus.ACTIVE.value
+        if state["next_action"] == "obtain approval":
+            state["next_action"] = (
+                state["current_frontier"][0] if state["current_frontier"] else None
+            )
 
-    if kind == "approve":
-        state["status"] = MissionStatus.ACTIVE.value
-        state["next_action"] = "advance mission"
-        state["current_frontier"] = ["advance mission"]
-    elif kind == "pause":
+    elif event.kind == "pause":
         state["status"] = MissionStatus.PAUSED.value
-    elif kind == "resume":
+        reason = payload.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            _append_unique(state["blockers"], f"PAUSED:{reason}")
+
+    elif event.kind == "resume":
         state["status"] = MissionStatus.ACTIVE.value
-    elif kind == "block":
+        state["blockers"] = [
+            item for item in state["blockers"] if not str(item).startswith("PAUSED:")
+        ]
+
+    elif event.kind == "block":
+        reason = _required_string(payload, "reason", "BLOCK_REASON_REQUIRED")
         state["status"] = MissionStatus.BLOCKED.value
-        blockers = list(state.get("blockers") or [])
-        blockers.append(detail.get("reason") or "blocked")
-        state["blockers"] = blockers
-    elif kind == "unblock":
-        if authority.get("revoked") is True:
-            raise TransitionError("AUTHORITY_REVOKED: revoked missions cannot unblock")
-        state["status"] = MissionStatus.ACTIVE.value
-        state["blockers"] = []
-    elif kind == "begin_verification":
+        _append_unique(state["blockers"], reason)
+        state["next_action"] = f"resolve blocker: {reason}"
+
+    elif event.kind == "unblock":
+        reason = payload.get("reason")
+        reconciliation_blockers = [
+            item
+            for item in state["blockers"]
+            if _reconciliation_subject(item) is not None
+        ]
+        if reconciliation_blockers and (
+            not isinstance(reason, str) or reason in reconciliation_blockers
+        ):
+            raise TransitionError("RECONCILIATION_OBSERVATION_REQUIRED")
+        if isinstance(reason, str) and reason:
+            state["blockers"] = [item for item in state["blockers"] if item != reason]
+        else:
+            state["blockers"] = []
+        if state["blockers"]:
+            state["status"] = MissionStatus.BLOCKED.value
+            state["next_action"] = f"resolve blocker: {state['blockers'][0]}"
+        else:
+            state["status"] = MissionStatus.ACTIVE.value
+            state["next_action"] = (
+                state["current_frontier"][0] if state["current_frontier"] else None
+            )
+
+    elif event.kind == "begin_verification":
+        if not isinstance(integrity.get("completion_acceptor"), str) or not integrity[
+            "completion_acceptor"
+        ].strip():
+            raise TransitionError("COMPLETION_ACCEPTOR_REQUIRED")
+        if state["blockers"]:
+            raise TransitionError("UNRESOLVED_BLOCKERS")
+        if integrity["unresolved_verdicts"]:
+            raise TransitionError("UNRESOLVED_VERDICTS")
+        missing = _missing_proof_refs(data)
+        if missing:
+            raise TransitionError("PROOF_BUNDLE_NOT_READY:" + ",".join(missing))
         state["status"] = MissionStatus.VERIFYING.value
         state["next_action"] = "independent acceptance"
-    elif kind == "accept":
-        acceptor = integrity.get("completion_acceptor")
-        if event.actor_ref != acceptor:
-            raise TransitionError(
-                "INDEPENDENT_ACCEPTANCE_REQUIRED: actor is not the completion_acceptor"
-            )
-        if event.actor_ref == STEWARD_REF:
-            raise TransitionError(
-                "INDEPENDENT_ACCEPTANCE_REQUIRED: mission steward cannot self-accept"
-            )
-        if event.verdict != "PASS":
-            raise TransitionError("ACCEPT_REQUIRES_PASS: accept requires verdict PASS")
-        if integrity.get("unresolved_verdicts"):
-            raise TransitionError("UNRESOLVED_VERDICTS: cannot accept with unresolved verdicts")
-        durable = set(continuity.get("durable_artifacts") or [])
-        required = list(manifest.outcome.get("completion_proof") or [])
-        missing = [item for item in required if item not in durable and item not in artifacts]
+
+    elif event.kind == "accept":
+        _require_independent_acceptor(data, event)
+        if payload.get("verdict") != "PASS":
+            raise TransitionError("PASS_VERDICT_REQUIRED")
+        evidence_refs, coverage_limits = _acceptance_evidence(payload)
+        if integrity["unresolved_verdicts"]:
+            raise TransitionError("UNRESOLVED_VERDICTS")
+        missing = _missing_proof_refs(data)
         if missing:
-            raise TransitionError(
-                f"COMPLETION_PROOF_MISSING: {', '.join(missing)}"
-            )
-        # Ensure proof refs are retained.
-        for item in artifacts:
-            if item not in durable:
-                durable.add(item)
-        continuity["durable_artifacts"] = sorted(durable)
+            raise TransitionError("COMPLETION_PROOF_MISSING:" + ",".join(missing))
         state["status"] = MissionStatus.COMPLETED.value
-        state["next_action"] = None
         state["current_frontier"] = []
-    elif kind == "reject":
-        state["status"] = MissionStatus.ACTIVE.value
-        unresolved = list(integrity.get("unresolved_verdicts") or [])
-        unresolved.append(
+        state["next_action"] = None
+        continuity["decisions"].append(
             {
+                "kind": "independent-acceptance",
                 "actor_ref": event.actor_ref,
-                "verdict": event.verdict or "FAIL",
-                "detail": detail,
+                "verdict": "PASS",
+                "evidence_refs": evidence_refs,
+                "coverage_limits": coverage_limits,
             }
         )
-        integrity["unresolved_verdicts"] = unresolved
-        state["next_action"] = "address rejection"
-    elif kind == "revoke":
+
+    elif event.kind == "reject":
+        _require_independent_acceptor(data, event)
+        verdict = payload.get("verdict")
+        if verdict not in {"FAIL", "INCONCLUSIVE"}:
+            raise TransitionError("REJECTION_VERDICT_REQUIRED")
+        reason = _required_string(payload, "reason", "REJECTION_REASON_REQUIRED")
+        evidence_refs, coverage_limits = _acceptance_evidence(payload)
+        unresolved = f"{verdict}:{reason}"
+        _append_unique(integrity["unresolved_verdicts"], unresolved)
+        _append_unique(state["blockers"], unresolved)
+        state["status"] = (
+            MissionStatus.BLOCKED.value
+            if verdict == "INCONCLUSIVE"
+            else MissionStatus.ACTIVE.value
+        )
+        state["next_action"] = f"address verdict: {unresolved}"
+        continuity["decisions"].append(
+            {
+                "kind": "independent-rejection",
+                "actor_ref": event.actor_ref,
+                "verdict": verdict,
+                "reason": reason,
+                "evidence_refs": evidence_refs,
+                "coverage_limits": coverage_limits,
+            }
+        )
+
+    elif event.kind == "revoke":
+        _operator_only(manifest, event)
+        reason = _required_string(payload, "reason", "REVOCATION_REASON_REQUIRED")
         authority["revoked"] = True
-        authority["revocation_reason"] = detail.get("reason") or "revoked"
-        state["status"] = MissionStatus.BLOCKED.value
-        blockers = list(state.get("blockers") or [])
-        blockers.append("authority revoked")
-        state["blockers"] = blockers
-    elif kind == "cancel":
+        authority["revocation_reason"] = reason
         state["status"] = MissionStatus.CANCELLED.value
         state["next_action"] = None
-        state["current_frontier"] = []
-    elif kind == "record_action":
-        completed = list(state.get("completed_actions") or [])
-        completed.append(detail.get("action") or "action")
-        state["completed_actions"] = completed
-        for item in artifacts:
-            durable = list(continuity.get("durable_artifacts") or [])
-            if item not in durable:
-                durable.append(item)
-            continuity["durable_artifacts"] = durable
-    elif kind == "record_observation":
-        for item in artifacts:
-            durable = list(continuity.get("durable_artifacts") or [])
-            if item not in durable:
-                durable.append(item)
-            continuity["durable_artifacts"] = durable
-        decisions = list(continuity.get("decisions") or [])
-        if detail:
-            decisions.append(detail)
-            continuity["decisions"] = decisions
-    elif kind == "amend_authority":
-        amendment = detail.get("amendment")
-        if not isinstance(amendment, str) or not amendment.strip():
-            raise TransitionError("AMENDMENT_REQUIRED: amend_authority needs amendment text")
-        amendments = list(authority.get("amendments") or [])
-        amendments.append(amendment)
-        authority["amendments"] = amendments
-        # Instruction remains byte-identical.
-        authority["instruction"] = manifest.authority["instruction"]
+        _append_unique(state["blockers"], f"AUTHORITY_REVOKED:{reason}")
 
-    # Preserve operator instruction verbatim on every path.
-    authority["instruction"] = manifest.authority["instruction"]
+    elif event.kind == "cancel":
+        _operator_only(manifest, event)
+        state["status"] = MissionStatus.CANCELLED.value
+        state["next_action"] = None
 
-    errors = validate_manifest_dict(payload)
-    if errors:
-        raise TransitionError("INVALID_RESULT: " + "; ".join(errors))
-    return MissionManifest.from_dict(payload)
+    elif event.kind == "record_action":
+        action_ref = _required_string(payload, "action_ref", "ACTION_REF_REQUIRED")
+        _append_unique(state["completed_actions"], action_ref)
+        _append_unique(continuity["durable_artifacts"], action_ref)
+        continuity["decisions"].append(
+            {
+                "kind": "material-action",
+                "actor_ref": event.actor_ref,
+                "action_ref": action_ref,
+            }
+        )
+
+    elif event.kind == "record_observation":
+        artifact_ref = _required_string(
+            payload, "artifact_ref", "OBSERVATION_ARTIFACT_REQUIRED"
+        )
+        fact = payload.get("fact")
+        if not isinstance(fact, Mapping) or set(fact) != {"subject_ref", "value"}:
+            raise TransitionError("OBSERVATION_FACT_REQUIRED")
+        subject_ref = fact.get("subject_ref")
+        if not isinstance(subject_ref, str) or not subject_ref.strip():
+            raise TransitionError("OBSERVATION_SUBJECT_REQUIRED")
+        _append_unique(continuity["durable_artifacts"], artifact_ref)
+        data["truth"]["verified_facts"] = [
+            item
+            for item in data["truth"]["verified_facts"]
+            if not (
+                isinstance(item, Mapping)
+                and item.get("subject_ref") == subject_ref
+            )
+        ]
+        data["truth"]["verified_facts"].append(deepcopy(dict(fact)))
+        for field_name in ("contradictions", "unknowns"):
+            data["truth"][field_name] = [
+                item
+                for item in data["truth"][field_name]
+                if not (
+                    isinstance(item, Mapping)
+                    and item.get("subject_ref") == subject_ref
+                )
+            ]
+        state["blockers"] = [
+            marker
+            for marker in state["blockers"]
+            if _reconciliation_subject(marker) != subject_ref
+        ]
+        integrity["unresolved_verdicts"] = [
+            marker
+            for marker in integrity["unresolved_verdicts"]
+            if _reconciliation_subject(marker) != subject_ref
+        ]
+        if current == MissionStatus.BLOCKED.value:
+            if state["blockers"] or integrity["unresolved_verdicts"]:
+                state["status"] = MissionStatus.BLOCKED.value
+                state["next_action"] = (
+                    f"resolve blocker: {state['blockers'][0]}"
+                    if state["blockers"]
+                    else "resolve unresolved verdict"
+                )
+            else:
+                state["status"] = MissionStatus.ACTIVE.value
+                state["next_action"] = (
+                    state["current_frontier"][0]
+                    if state["current_frontier"]
+                    else "resume mission"
+                )
+
+    elif event.kind == "amend_authority":
+        _operator_only(manifest, event)
+        amendment = _required_string(payload, "amendment", "AMENDMENT_REQUIRED")
+        authority["amendments"].append(amendment)
+        for field, key in (
+            ("permissions", "permissions_add"),
+            ("protected_state", "protected_state_add"),
+            ("acceptable_costs", "acceptable_costs_add"),
+            ("escalation_required_for", "escalation_required_for_add"),
+        ):
+            additions = payload.get(key, [])
+            if not isinstance(additions, list):
+                raise TransitionError(f"INVALID_AMENDMENT_FIELD:{key}")
+            for item in additions:
+                if not isinstance(item, str) or not item.strip():
+                    raise TransitionError(f"INVALID_AMENDMENT_ITEM:{key}")
+                _append_unique(authority[field], item)
+
+    checkpoint_ref = payload.get("checkpoint_ref")
+    if isinstance(checkpoint_ref, str) and checkpoint_ref.strip():
+        continuity["prior_checkpoint"] = checkpoint_ref
+
+    data["revision"] = manifest.revision + 1
+    if authority.get("instruction") != original_instruction:
+        raise TransitionError("OPERATOR_INSTRUCTION_MUTATED")
+    return MissionManifest.from_dict(data)

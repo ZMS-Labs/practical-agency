@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/execution-receipt@1",
-  "title": "execution-receipt@1",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/execution-request@1",
+  "title": "execution-request@1",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,16 +9,15 @@
     "request_id",
     "mission_id",
     "mission_revision",
-    "adapter_ref",
-    "status",
-    "artifact_refs",
-    "observed_effects",
-    "external_receipt_ref",
-    "coverage_limits"
+    "capability_id",
+    "requested_permissions",
+    "requested_effects",
+    "estimated_costs",
+    "action"
   ],
   "properties": {
     "schema": {
-      "const": "execution-receipt@1"
+      "const": "execution-request@1"
     },
     "request_id": {
       "type": "string",
@@ -32,41 +31,34 @@
       "type": "integer",
       "minimum": 1
     },
-    "adapter_ref": {
+    "capability_id": {
       "type": "string",
       "minLength": 1
     },
-    "status": {
-      "enum": [
-        "completed",
-        "blocked",
-        "failed",
-        "declined"
-      ]
-    },
-    "artifact_refs": {
+    "requested_permissions": {
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1
       }
     },
-    "observed_effects": {
-      "type": "array",
-      "items": {}
-    },
-    "external_receipt_ref": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "coverage_limits": {
+    "requested_effects": {
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1
       }
+    },
+    "estimated_costs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }
