@@ -44,7 +44,8 @@
         "cancel",
         "record_action",
         "record_observation",
-        "amend_authority"
+        "amend_authority",
+        "apply_mission_os"
       ]
     },
     "actor_ref": {

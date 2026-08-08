@@ -5,7 +5,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from practical_agency.deferred_interest import validate_deferred_interest
 from practical_agency.manifest_model import MissionManifest, MissionStatus
+from practical_agency.mission_os import _defer_critical_path, _validate_labels
 
 
 class TransitionError(RuntimeError):
@@ -57,6 +59,7 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.PAUSED.value,
         MissionStatus.BLOCKED.value,
     },
+    "apply_mission_os": {MissionStatus.ACTIVE.value},
 }
 
 
@@ -372,6 +375,96 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 if not isinstance(item, str) or not item.strip():
                     raise TransitionError(f"INVALID_AMENDMENT_ITEM:{key}")
                 _append_unique(authority[field], item)
+
+    elif event.kind == "apply_mission_os":
+        proposal_kind = payload.get("proposal_kind")
+        if not isinstance(proposal_kind, str) or not proposal_kind.strip():
+            raise TransitionError("MISSION_OS_PROPOSAL_KIND_REQUIRED")
+        new_revision = manifest.revision + 1
+        continuity.setdefault("deferred_interests", [])
+        decision_extra: dict[str, Any] = {}
+
+        if proposal_kind in ("frontier_patch", "replan_slice"):
+            labels = _string_list(
+                payload, "labels", "FRONTIER_LABELS_REQUIRED", non_empty=True
+            )
+            try:
+                _validate_labels(labels)
+            except ValueError as exc:
+                raise TransitionError(str(exc)) from exc
+            state["current_frontier"] = labels
+            state["next_action"] = labels[0] if labels else None
+            if proposal_kind == "replan_slice":
+                contradiction_refs = _string_list(
+                    payload,
+                    "contradiction_refs",
+                    "REPLAN_CONTRADICTION_REQUIRED",
+                    non_empty=True,
+                )
+                for ref in contradiction_refs:
+                    _append_unique(data["truth"]["contradictions"], ref)
+                decision_extra["contradiction_refs"] = contradiction_refs
+
+        elif proposal_kind == "defer":
+            interest = payload.get("interest")
+            if not isinstance(interest, Mapping):
+                raise TransitionError("DEFERRED_INTEREST_REQUIRED")
+            copied = deepcopy(dict(interest))
+            errors = validate_deferred_interest(
+                copied, mission_id=manifest.mission_id
+            )
+            if errors:
+                raise TransitionError(errors[0])
+            try:
+                _defer_critical_path(
+                    manifest, copied, completion_proof_ids=None
+                )
+            except ValueError as exc:
+                raise TransitionError(str(exc)) from exc
+            continuity["deferred_interests"].append(copied)
+
+        elif proposal_kind == "return_rebind":
+            invalidate = payload.get("invalidate")
+            if not isinstance(invalidate, list) or not invalidate:
+                raise TransitionError("RETURN_REBIND_INVALIDATE_REQUIRED")
+            invalidated = deepcopy(invalidate)
+            decision_extra["invalidate"] = invalidated
+
+        elif proposal_kind == "absorb":
+            idx = payload.get("interest_index")
+            if isinstance(idx, bool) or not isinstance(idx, int):
+                raise TransitionError("ABSORB_INTEREST_INDEX_REQUIRED")
+            interests = continuity["deferred_interests"]
+            if idx < 0 or idx >= len(interests):
+                raise TransitionError("ABSORB_INTEREST_NOT_FOUND")
+            interest = interests[idx]
+            if not isinstance(interest, Mapping):
+                raise TransitionError("ABSORB_INTEREST_NOT_FOUND")
+            if interest.get("status") != "open":
+                raise TransitionError("ABSORB_INTEREST_NOT_OPEN")
+            criticality = interest.get("criticality")
+            if criticality == "high":
+                _operator_only(manifest, event)
+                amendment = payload.get("amendment")
+                if not isinstance(amendment, str) or not amendment.strip():
+                    raise TransitionError("HIGH_ABSORB_AMENDMENT_REQUIRED")
+                authority["amendments"].append(amendment.strip())
+            interests[idx] = dict(interest)
+            interests[idx]["status"] = "absorbed"
+            decision_extra["interest_index"] = idx
+
+        else:
+            raise TransitionError(f"UNKNOWN_MISSION_OS_PROPOSAL:{proposal_kind}")
+
+        continuity["decisions"].append(
+            {
+                "kind": "mission-os-apply",
+                "proposal_kind": proposal_kind,
+                "actor_ref": event.actor_ref,
+                "at_revision": new_revision,
+                **decision_extra,
+            }
+        )
 
     checkpoint_ref = payload.get("checkpoint_ref")
     if isinstance(checkpoint_ref, str) and checkpoint_ref.strip():
