@@ -3,6 +3,10 @@
 Status: **candidate / unreleased**. Do not tag until independent review and
 per-harness loading evidence close.
 
+Tagging `0.1.0` does **not** satisfy
+[RELEASE-1.0.0-CRITERIA.md](RELEASE-1.0.0-CRITERIA.md). See
+[VERSIONING.md](VERSIONING.md) for the claim-surface ladder.
+
 ## PROVEN
 
 - `mission-manifest@1` structural schema + semantic validator
