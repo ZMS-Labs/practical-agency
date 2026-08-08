@@ -279,9 +279,12 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
     if deferred_interests is not None:
         if not isinstance(deferred_interests, list):
             pass
-        elif isinstance(mission_id, str) and mission_id.strip():
+        elif isinstance(deferred_interests, list):
+            manifest_mission_id = str(payload.get("mission_id") or "")
             for index, item in enumerate(deferred_interests):
-                for error in validate_deferred_interest(item, mission_id=mission_id):
+                for error in validate_deferred_interest(
+                    item, mission_id=manifest_mission_id
+                ):
                     errors.append(
                         f"DEFERRED_INTEREST: continuity.deferred_interests[{index}]: {error}"
                     )

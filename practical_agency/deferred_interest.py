@@ -43,6 +43,8 @@ def validate_deferred_interest(
     errors: list[str] = []
     if set(obj) - _REQUIRED:
         errors.append("DEFERRED_INTEREST_UNKNOWN_FIELD")
+    if _REQUIRED - set(obj):
+        errors.append("DEFERRED_INTEREST_MISSING_FIELD")
     if obj.get("schema") != "deferred-interest@1":
         errors.append("DEFERRED_INTEREST_SCHEMA")
     if obj.get("mission_id") != mission_id:

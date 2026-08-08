@@ -9,6 +9,20 @@ from tests.helpers import clone_payload
 
 
 class DeferredInterestTests(unittest.TestCase):
+    def test_missing_suggested_next_key_rejected(self) -> None:
+        item = {
+            "schema": "deferred-interest@1",
+            "mission_id": "mission-001",
+            "summary": "parked thread",
+            "criticality": "low",
+            "why_not_now": "not on critical path",
+            "subject_refs": [],
+            "created_at_revision": 1,
+            "status": "open",
+        }
+        errors = validate_deferred_interest(item, mission_id="mission-001")
+        self.assertTrue(any("DEFERRED_INTEREST_MISSING_FIELD" in e for e in errors))
+
     def test_high_requires_subject_refs(self) -> None:
         errors = validate_deferred_interest(
             {
