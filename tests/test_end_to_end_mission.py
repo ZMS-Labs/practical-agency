@@ -1,193 +1,211 @@
 from __future__ import annotations
 
-import dataclasses
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
-from practical_agency.capability_discovery import discover_capabilities
-from practical_agency.checkpoint_store import FileCheckpointStore, reconcile_observations
-from practical_agency.coordinator import MissionCoordinator
+from practical_agency.capability_discovery import FileSystemSkillProvider
+from practical_agency.checkpoint_store import (
+    FileCheckpointStore,
+    apply_reconciliation_findings,
+    reconcile_observations,
+)
+from practical_agency.coordinator import coordinate_once, dispatch_once
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.state_machine import MissionEvent, TransitionError, apply_event
-from practical_agency.validation import validate_manifest_dict
+from practical_agency.state_machine import TransitionError, apply_event_data
+from tests.helpers import clone_payload, mission_os_event
 
 
-class _Adapter:
+class MemoryAdapter:
+    adapter_ref = "memory:test"
+    capability_ids = ("fixture-writer",)
+
     def __init__(self) -> None:
-        self.writes = 0
+        self.calls: list[dict[str, Any]] = []
 
-    def dispatch(self, request: dict) -> dict:
-        self.writes += 1
+    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(request)
+        call = len(self.calls)
         return {
+            "schema": "execution-receipt@1",
+            "request_id": request["request_id"],
+            "mission_id": request["mission_id"],
+            "mission_revision": request["mission_revision"],
+            "adapter_ref": "memory:test",
             "status": "completed",
-            "artifact_refs": ["examples/out.txt", "validator passes"],
-            "observed_effects": ["examples/out.txt"],
-            "external_ref": f"receipt:{self.writes}",
+            "artifact_refs": [f"artifact:call-{call}"],
+            "observed_effects": request.get("requested_effects", []),
+            "external_receipt_ref": f"memory://receipt/{call}",
+            "coverage_limits": ["in-memory fixture only"],
         }
-
-
-INSTRUCTION = "Create and verify the example artifact."
-
-
-def _new_draft() -> MissionManifest:
-    payload = {
-        "schema": "mission-manifest@1",
-        "mission_id": "mission-e2e",
-        "revision": 1,
-        "authority": {
-            "operator_ref": "operator:test",
-            "instruction": INSTRUCTION,
-            "amendments": [],
-            "permissions": ["repository:write"],
-            "protected_state": ["unrelated files"],
-            "acceptable_costs": ["one feature branch"],
-            "escalation_required_for": ["destructive action"],
-            "revoked": False,
-            "revocation_reason": None,
-        },
-        "outcome": {
-            "desired_state": "The example artifact exists and validates.",
-            "completion_proof": ["validator passes"],
-            "integrity_guards": ["runtime reads the canonical artifact"],
-            "scope_proof": ["diff contains only intended files"],
-            "stop_conditions": ["operator revokes authority"],
-        },
-        "truth": {
-            "subject_refs": ["artifact:examples/out.txt"],
-            "verified_facts": [
-                {"subject_ref": "artifact:examples/out.txt", "value": "missing"}
-            ],
-            "assumptions": [],
-            "contradictions": [],
-            "unknowns": [],
-        },
-        "state": {
-            "status": "draft",
-            "completed_actions": [],
-            "current_frontier": ["write example"],
-            "blockers": [],
-            "next_action": "write example",
-        },
-        "capabilities": {
-            "discovered_at": None,
-            "available": [],
-            "invoked": [],
-            "unavailable": [],
-            "degraded": [],
-        },
-        "continuity": {
-            "prior_checkpoint": None,
-            "durable_artifacts": [],
-            "decisions": [],
-            "external_handoffs": [],
-            "watch_commissions": [],
-        },
-        "integrity": {
-            "actor_may_self_accept": False,
-            "required_gates": [],
-            "unresolved_verdicts": [],
-            "completion_acceptor": "acceptor:independent",
-        },
-    }
-    assert validate_manifest_dict(payload) == []
-    return MissionManifest.from_dict(payload)
 
 
 class EndToEndMissionTests(unittest.TestCase):
     def test_resumable_independently_accepted_mission(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+        original_instruction = "Keep  the operator's exact words\nacross every restart."
+        payload = clone_payload()
+        payload["authority"]["instruction"] = original_instruction
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        draft = MissionManifest.from_dict(payload)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
             store = FileCheckpointStore(root / "checkpoints")
-            skills = root / "skills"
-            skill = skills / "fixture-writer"
-            skill.mkdir(parents=True)
-            (skill / "SKILL.md").write_text(
-                "---\nname: fixture-writer\ndescription: Write the example artifact.\n---\n\n# fixture-writer\n",
-                encoding="utf-8",
+            first_receipt = store.save(draft)
+            active = apply_event_data(
+                draft,
+                "approve", "operator:test", {"checkpoint_ref": first_receipt.path},
             )
-
-            draft = _new_draft()
-            store.save(draft)
-            active = apply_event(
-                draft, MissionEvent(kind="approve", actor_ref="operator:test")
-            )
-            store.save(active)
-
-            caps = discover_capabilities([skills])
-            self.assertEqual([cap.capability_id for cap in caps], ["fixture-writer"])
-
-            adapter = _Adapter()
-            coordinator = MissionCoordinator(store=store, adapter=adapter)
-            decision, advanced = coordinator.step(
+            active = apply_event_data(
                 active,
-                capabilities=caps,
-                operator_capability_id="fixture-writer",
-            )
-            self.assertEqual(decision.kind, "DISPATCH")
-            self.assertEqual(adapter.writes, 1)
-            revision_n = advanced.revision
-            store.save(advanced)
-
-            # Discard in-memory objects and reload.
-            del draft, active, advanced, coordinator, adapter
-            loaded, receipt = store.load_latest("mission-e2e")
-            self.assertEqual(loaded.revision, revision_n)
-            self.assertEqual(loaded.authority["instruction"], INSTRUCTION)
-            self.assertTrue(receipt.sha256)
-
-            findings = reconcile_observations(
-                loaded, {"artifact:examples/out.txt": "present"}
-            )
-            self.assertTrue(any(item.classification == "CONTRADICTED" for item in findings))
-            reopened = apply_event(
-                loaded,
-                MissionEvent(
-                    kind="record_observation",
-                    actor_ref="mission-steward",
-                    detail={
-                        "reconciliation": [
-                            dataclasses.asdict(finding) for finding in findings
-                        ]
-                    },
-                    artifact_refs=["examples/out.txt"],
+                "apply_mission_os",
+                "mission-steward",
+                mission_os_event(
+                    active,
+                    "frontier_patch",
+                    {"labels": ["write canonical artifact"]},
                 ),
             )
-            adapter = _Adapter()
-            coordinator = MissionCoordinator(store=store, adapter=adapter)
-            _decision, corrected = coordinator.step(
-                reopened,
-                capabilities=caps,
-                operator_capability_id="fixture-writer",
-            )
-            self.assertEqual(adapter.writes, 1)
 
-            verifying_decision, verifying = coordinator.step(
-                corrected,
-                capabilities=caps,
-                propose_completion=True,
+            skills = root / "skills"
+            fixture = skills / "fixture-writer"
+            fixture.mkdir(parents=True)
+            fixture.joinpath("SKILL.md").write_text(
+                "---\nname: fixture-writer\ndescription: Use to write the fixture.\n"
+                "metadata:\n  persistence: session\n  independence: actor\n"
+                "  authority_required: [repository:write]\n---\n# fixture\n",
+                encoding="utf-8",
             )
-            self.assertEqual(verifying_decision.kind, "VERIFY")
-            self.assertEqual(verifying.state["status"], "verifying")
+            discovered = FileSystemSkillProvider(skills).discover()
+            self.assertEqual(
+                [item.capability_id for item in discovered], ["fixture-writer"]
+            )
 
-            with self.assertRaisesRegex(TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"):
-                coordinator.accept(
-                    verifying,
-                    actor_ref="mission-steward",
-                    verdict="PASS",
-                    artifact_refs=["validator passes"],
+            adapter = MemoryAdapter()
+            decision = coordinate_once(
+                active,
+                execution_request={
+                    "capability_id": "fixture-writer",
+                    "requested_permissions": ["repository:write"],
+                    "requested_effects": ["intended files"],
+                    "estimated_costs": ["one feature branch"],
+                    "action": "write canonical artifact",
+                },
+                checkpoint_store=store,
+            )
+            result = dispatch_once(active, decision, adapter)
+            acted = apply_event_data(
+                active,
+                "record_execution_receipt",
+                "mission-steward",
+                {"receipt": result, "request": decision.request},
+            )
+            acted = apply_event_data(
+                acted,
+                "record_action", "mission-steward", {"action_ref": result["artifact_refs"][0]},
+            )
+            artifact_hash = hashlib.sha256(b"canonical artifact").hexdigest()
+            observed = apply_event_data(
+                acted,
+                "record_observation", "observer:test", {
+                        "artifact_ref": "artifact:validator-pass",
+                        "fact": {
+                            "subject_ref": "artifact:canonical",
+                            "value": artifact_hash,
+                        },
+                    },
+            )
+            checkpoint = store.save(observed)
+
+            del draft, active, acted, observed, decision, result
+            resumed = store.load(checkpoint)
+            self.assertEqual(resumed.authority["instruction"], original_instruction)
+
+            live_hash = hashlib.sha256(b"unexpected live artifact").hexdigest()
+            findings = reconcile_observations(
+                resumed, {"artifact:canonical": live_hash}
+            )
+            self.assertEqual(findings[0].classification, "CONTRADICTED")
+            reopened = apply_reconciliation_findings(resumed, findings)
+            self.assertEqual(reopened.state["status"], "active")
+            self.assertTrue(reopened.state["blockers"])
+            self.assertNotIn(
+                "artifact:validator-pass",
+                reopened.continuity["durable_artifacts"],
+            )
+            with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
+                apply_event_data(
+                    reopened,
+                    "begin_verification", "mission-steward", {},
                 )
 
-            completed = coordinator.accept(
-                verifying,
-                actor_ref="acceptor:independent",
-                verdict="PASS",
-                artifact_refs=["validator passes"],
+            correction = coordinate_once(
+                reopened,
+                execution_request={
+                    "capability_id": "fixture-writer",
+                    "requested_permissions": ["repository:write"],
+                    "requested_effects": ["intended files"],
+                    "estimated_costs": ["one feature branch"],
+                    "action": reopened.state["next_action"],
+                },
+                checkpoint_store=store,
             )
-            self.assertEqual(completed.state["status"], "completed")
-            final, _final_receipt = store.load_latest("mission-e2e")
+            correction_result = dispatch_once(reopened, correction, adapter)
+            corrected = apply_event_data(
+                reopened,
+                "record_action", "mission-steward", {"action_ref": correction_result["artifact_refs"][0]},
+            )
+            self.assertNotIn(
+                "artifact:validator-pass",
+                corrected.continuity["durable_artifacts"],
+            )
+
+            repaired_hash = hashlib.sha256(b"repaired canonical artifact").hexdigest()
+            reobserved = apply_event_data(
+                corrected,
+                "record_observation", "observer:test", {
+                        "artifact_ref": "artifact:validator-pass",
+                        "fact": {
+                            "subject_ref": "artifact:canonical",
+                            "value": repaired_hash,
+                        },
+                    },
+            )
+            self.assertEqual(reobserved.state["blockers"], [])
+            self.assertEqual(reobserved.integrity["unresolved_verdicts"], [])
+            verifying = apply_event_data(
+                reobserved,
+                "begin_verification", "mission-steward", {},
+            )
+
+            verdict = {
+                "verdict": "PASS",
+                "evidence_refs": ["artifact:independent-review"],
+                "coverage_limits": ["isolated fixture"],
+            }
+            with self.assertRaisesRegex(
+                TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"
+            ):
+                apply_event_data(
+                    verifying,
+                    "accept", "mission-steward", verdict,
+                )
+
+            completed = apply_event_data(
+                verifying,
+                "accept", "reviewer:test", verdict,
+            )
+            final_receipt = store.save(completed)
+            final = store.load(final_receipt)
             self.assertEqual(final.state["status"], "completed")
-            self.assertEqual(final.authority["instruction"], INSTRUCTION)
+            self.assertEqual(final.authority["instruction"], original_instruction)
+            self.assertEqual(len(adapter.calls), 2)
+            self.assertEqual(
+                final.continuity["decisions"][-1]["evidence_refs"],
+                ["artifact:independent-review"],
+            )
 
 
 if __name__ == "__main__":

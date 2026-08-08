@@ -1,44 +1,38 @@
-# Agent notes — Practical Agency
+# Agent instructions
 
-## Project identity
+Practical Agency is a deterministic mission-control kernel with exactly one
+public skill, `manifest`.
 
-- Repository / project: **practical-agency** / **Practical Agency**
-- Sole public skill: **`manifest`** at `skills/manifest/SKILL.md`
-- Doctrine: bounded delegated agency
-- Distribution name: `zms-practical-agency` (PyPI-safe); do not claim an unscoped package name
+## Invariants
 
-## Hard rules
+- Preserve operator instructions verbatim; amendments are append-only.
+- Do not add a second public skill for resume, checkpoint, reconcile, dispatch,
+  commission, or closure. Those are internal mission operations.
+- Do not hard-code an inventory of workflow or epistemic capabilities.
+- A mission steward never self-certifies material completion.
+- No background, runtime, scheduler, or persistence claim is valid without an
+  external durable receipt.
+- `watch-commission@1` remains governed by its upstream semantic verifier.
+  Practical Agency may retain a verified record but may not duplicate or weaken
+  that verifier.
+- No production adapter may execute arbitrary shell commands by default.
+- Keep public content free of private infrastructure, credentials, hostnames,
+  local absolute paths, and non-public repository coordinates.
 
-- Do not create additional public skills for resume, checkpoint, reconcile, dispatch, commission, or close.
-- Preserve operator-authored instructions and amendments verbatim and append-only.
-- Material completion requires an independent acceptor; never self-certify.
-- No runtime, scheduler, or persistence claim without an external durable receipt.
-- Stdlib-only deterministic core; adapter dependencies remain optional and isolated.
-- Every production behavior change follows RED → GREEN → REFACTOR.
-- Every commit carries `Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>`.
-- Public content must not expose private repository names, local absolute paths, credentials, hostnames, or estate topology.
+## Development discipline
 
-## Current status
+1. Write the failing test first and verify the expected failure.
+2. Implement only enough behavior to pass it.
+3. Run the focused test and the full suite.
+4. Preserve exact named refusal codes and closed state transitions.
+5. Sign every commit with a DCO trailer matching the commit author.
 
-`0.1.0` metadata describes an **unreleased seed**. Do not call this a deterministic
-mission kernel until the seed-adoption plan Tasks 2–9 and independent acceptance
-pass. It is neither a daemon, hosted service, nor autonomous background actor.
-
-## Commands
+## Required verification
 
 ```bash
 python -m unittest discover -s tests -p 'test_*.py' -v
 python -m compileall -q practical_agency tests
+python .github/scripts/check_contracts.py
+python .github/scripts/check_package.py
+python .github/scripts/check_public_content.py
 ```
-
-## Repository settings (operator)
-
-Normalize when admin rights are available:
-
-- projects: disabled
-- wiki: disabled
-- squash merge: enabled
-- merge commits: disabled
-- rebase merge: disabled
-- auto-merge: disabled initially
-- delete head branches: enabled
