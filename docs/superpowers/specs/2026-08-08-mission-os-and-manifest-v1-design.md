@@ -1,15 +1,18 @@
 # Mission OS and Manifest v1 — design
 
 **Date:** 2026-08-08  
-**Status:** amended after metacognate + manual-degraded gauntlet/stress
-(`docs/gauntlet-runs/mission-os-v1-design-2026-08-08/`) — awaiting operator
-accept of **this** revision  
-**Orchestration note:** prior brainstorming assent covered packaging directions
-only; authoring session must not self-accept this amended tip  
+**Status:** operator-accepted 2026-08-08 (amended tip `ec7f95f` after
+metacognate + manual-degraded gauntlet/stress)  
+**Implementation plan:**
+`docs/superpowers/plans/2026-08-08-mission-os-first-slice.md`  
+**Orchestration note:** packaging directions came from brainstorming; P1
+hardening from gauntlet; operator durable assent recorded in-session 2026-08-08
+(“yes”) — authoring session still must not self-accept *implementation*  
 **Repo:** `practical-agency`  
 **Related:** `docs/release/MANIFEST-TEETH.md`, `docs/release/VERSIONING.md`,
 `docs/release/RELEASE-1.0.0-CRITERIA.md`,
-`docs/release/OPERATOR-WAIVER-DEFER-0.1.0-RELEASE-2026-08-08.md`
+`docs/release/OPERATOR-WAIVER-DEFER-0.1.0-RELEASE-2026-08-08.md`,
+`docs/gauntlet-runs/mission-os-v1-design-2026-08-08/`
 
 ## Summary
 
