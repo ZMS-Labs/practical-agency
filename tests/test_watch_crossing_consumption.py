@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.mission_os import propose_replan_slice
+from practical_agency.mission_os import bind_mission_os_proposal, propose_replan_slice
 from practical_agency.state_machine import TransitionError, apply_event_data
 from practical_agency.watch_commission import handle_crossing_event
 from tests.helpers import clone_payload
@@ -56,10 +56,24 @@ class WatchCrossingConsumptionTests(unittest.TestCase):
         reclosed_payload["state"]["next_action"] = None
         reclosed = MissionManifest.from_dict(reclosed_payload)
 
-        replayed_proposal = propose_replan_slice(
+        with self.assertRaisesRegex(
+            ValueError, "WATCH_CROSSING_ALREADY_CONSUMED"
+        ):
+            propose_replan_slice(
+                reclosed,
+                new_frontier=["reopen from the same crossing again"],
+                contradiction_refs=[event_ref],
+            )
+
+        forged_proposal = bind_mission_os_proposal(
             reclosed,
-            new_frontier=["reopen from the same crossing again"],
-            contradiction_refs=[event_ref],
+            "replan_slice",
+            {
+                "labels": ["reopen from the same crossing again"],
+                "basis_refs": [event_ref],
+                "replace_range": [0, 0],
+                "contradiction_refs": [event_ref],
+            },
         )
         with self.assertRaisesRegex(
             TransitionError, "WATCH_CROSSING_ALREADY_CONSUMED"
@@ -68,7 +82,7 @@ class WatchCrossingConsumptionTests(unittest.TestCase):
                 reclosed,
                 "apply_mission_os",
                 "mission-steward",
-                replayed_proposal.to_event_data(),
+                forged_proposal.to_event_data(),
             )
 
 
