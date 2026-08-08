@@ -1,7 +1,7 @@
 {
   "name": "practical-agency",
   "displayName": "Practical Agency",
-  "description": "Human-authorized mission control for durable agentic work — bounded delegated agency via the manifest skill and mission manifest artifact.",
+  "description": "Human-authorized mission control for durable agentic work through one manifest skill.",
   "version": "0.1.0",
   "author": {
     "name": "ZMS Labs",
@@ -10,12 +10,6 @@
   "homepage": "https://github.com/ZMS-Labs/practical-agency",
   "repository": "https://github.com/ZMS-Labs/practical-agency",
   "license": "GPL-3.0-or-later",
-  "keywords": [
-    "agent-skills",
-    "mission-control",
-    "delegation",
-    "authorization",
-    "manifest"
-  ],
+  "keywords": ["agent-skills", "mission-control", "delegation", "manifest"],
   "skills": "./skills/"
 }

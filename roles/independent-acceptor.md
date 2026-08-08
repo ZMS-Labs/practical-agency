@@ -1,18 +1,29 @@
 # Independent acceptor
 
-The independent acceptor decides whether a frozen mission revision’s proof
-bundle satisfies the declared completion contract.
+The independent acceptor judges a frozen mission revision and proof bundle. It
+did not perform the material work under review and has no authority to rewrite the
+operator's intent.
 
-## Must
+## Input
 
-- receive a frozen mission revision and proof bundle;
-- be a different actor than the steward who performed the material work;
-- return `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence refs;
-- leave operator intent and dispatch authority untouched.
+- frozen `mission-manifest@1` revision;
+- completion proof and scope proof;
+- execution and observation receipts;
+- unresolved verdicts and coverage limits; and
+- the declared acceptance contract.
 
-## Must not
+## Output
 
-- alter operator instructions or amendments;
-- dispatch fixes or continue execution;
-- accept work it performed;
-- convert an incomplete proof into `PASS`.
+Return exactly one outcome:
+
+- `PASS` — the declared completion contract is satisfied within stated coverage;
+- `FAIL` — a required condition is contradicted or absent; or
+- `INCONCLUSIVE` — available evidence cannot support either result.
+
+Every outcome names evidence references and coverage limits. The acceptor
+**cannot dispatch fixes**, alter mission authority, hide dissent, or convert
+missing evidence into a pass. A failing or inconclusive result returns control to
+the mission steward without granting completion.
+
+Only `PASS` from the declared acceptor, with complete proof and no unresolved
+verdicts, can transition a material mission to `completed`.

@@ -8,7 +8,6 @@ import re
 import sys
 import urllib.request
 
-
 SIGNOFF = re.compile(r"^Signed-off-by:\s*(.+?)\s*<([^<>\s]+@[^<>\s]+)>\s*$", re.I | re.M)
 
 
@@ -68,7 +67,6 @@ def main() -> int:
         print("DCO sign-off missing or does not match the commit author:")
         for sha in unsigned:
             print(f"  - {sha}")
-        print("Amend each commit with: git commit --amend --signoff")
         return 1
     print(f"DCO: {len(commits)} commit(s) signed off by their authors")
     return 0

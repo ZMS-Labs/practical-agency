@@ -11,112 +11,141 @@ authority, protected state, acceptable costs, and right to interrupt; the system
 preserves those constraints while coordinating workflow, epistemic discipline,
 execution substrates, continuity, and independent proof.
 
-| Concept | Name |
+## Status
+
+Version 0.1 is a deterministic, standard-library mission kernel plus a portable
+Agent Skill. It is **not a daemon**, hosted service, scheduler, autonomous
+background actor, or source of independent machine goals.
+
+The repository proves deterministic mission custody, bounded authority, atomic
+checkpoints, dynamic capability discovery, request/receipt binding, exact return
+points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
+independent completion, and pinned commission-contract interoperability in
+isolated tests.
+
+There is **no general-purpose shell execution adapter**. A bounded filesystem artifact adapter can write allowlisted text artifacts with on-disk
+receipts (`practical_agency.filesystem_artifact`). That is not v1 readiness.
+Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
+(see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
+Customize→Skills panel and Claude live load remain unverified.
+comparative benefit over an ordinary capable agent is also unestablished
+until a controlled evaluation exists. Operator direction: defer `0.1.0` tag
+ceremony; invest in teeth toward v1.
+
+`1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
+authorized intent installable in a declared harness, advanced through at least
+one bounded adapter with an external durable receipt, resumable from
+checkpoints, and closable only by an independent acceptor. See
+[docs/release/VERSIONING.md](docs/release/VERSIONING.md) and
+[docs/release/RELEASE-1.0.0-CRITERIA.md](docs/release/RELEASE-1.0.0-CRITERIA.md).
+Tagging or accepting `0.1.0` does not satisfy those criteria.
+
+## Conceptual stack
+
+| Layer | Owns |
 | --- | --- |
-| Project | Practical Agency |
-| Public skill | `manifest` |
-| Doctrine | Bounded delegated agency |
-| Role | Mission steward |
-| Artifact | Mission manifest |
-| Distribution | `zms-practical-agency` |
+| Operator | Purpose, authority, protected state, cost, revocation |
+| Practical Agency | Mission custody, continuity, capability coordination, checkpoints |
+| Workflow methods | How implementation, debugging, and verification proceed |
+| Epistemic methods | What makes a claim, gate, observation, or decision trustworthy |
+| External substrates | Actual execution, scheduling, monitoring, and notification |
 
-Licensed under [GPL-3.0-or-later](LICENSE).
-
-## Current status
-
-`0.1.0` remains an **unreleased** version. This branch adds a stdlib
-deterministic mission kernel (`mission-manifest@1`, authority/transitions,
-atomic checkpoints, dynamic capability discovery, bounded coordinator) and
-upgrades the sole public `manifest` skill. It is still **not** a production
-runtime: no daemon, hosted service, autonomous background actor, or production
-execution adapter is claimed. Live harness loading and comparative efficacy
-remain unverified until exercised per harness.
-
-## What this is
-
-Most agent stacks optimize *execution*: plans, tools, and verification loops.
-Practical Agency optimizes *delegation*: who may act, on what scope, for how
-long, with what stop rules, and what durable record survives when the chat ends.
-
-The steward does not replace the sovereign (the human). It holds continuity for a
-**mission** — a bounded slice of work with explicit authorization — and refuses
-to expand agency beyond what the manifest records.
+The project doctrine is **bounded delegated agency**. The acting role is the
+**mission steward**. The durable artifact is `mission-manifest@1`.
 
 ## Quick start
 
-1. Install the package for your harness (see [Installation](#installation)).
-2. When a task is more than a single reversible edit — multi-step, cross-session,
-   consequential, or shared across agents — invoke **`manifest`** before
-   expanding scope.
-3. Author or update a **mission manifest** at the mission's authoritative sink
-   (usually the repo or project root). Treat the manifest as the contract of
-   record; chat is not.
+1. Install or expose [`skills/manifest/SKILL.md`](skills/manifest/SKILL.md) to the
+   harness.
+2. Invoke `manifest` for a multi-step, consequential, resumable, or cross-agent
+   outcome. “Helix it” is accepted as compatibility intent for the same mission
+   driver.
+3. Create and validate a mission manifest from
+   [`examples/minimal-mission.json`](examples/minimal-mission.json).
+4. Save revision 1 before approval, then advance the mission through closed
+   events and atomic checkpoints.
+5. Complete material work only through the declared independent acceptor.
 
-## The `manifest` skill
+A routine, reversible, directly checkable one-step task should not mint a mission.
 
-The only published skill in this package is [`manifest`](skills/manifest/SKILL.md).
-It tells a mission steward how to:
+## Deterministic kernel
 
-- open, resume, or close a mission without silent scope creep;
-- bind human authorization to concrete allowed actions;
-- persist decisions and stop conditions in a mission manifest;
-- hand off or pause without losing defensibility.
+The Python package contains:
 
-## Mission manifest (artifact)
+- strict `mission-manifest@1` validation and canonical JSON;
+- authority checks for permissions, protected state, costs, escalation, and
+  revocation;
+- a closed mission state machine with proof-ready, evidence-bearing independent
+  acceptance;
+- hash-bound atomic checkpoint storage;
+- live-state reconciliation that invalidates stale completion/gate artifacts,
+  opens one bounded repair frontier, and requires fresh observation before
+  verification;
+- dynamic capability discovery from immediate `SKILL.md` children, without a
+  copied member list;
+- exact request/result/receipt and return-point binding;
+- one-action coordination, with load-bearing blockers permitting only the exact
+  recorded remediation action; and
+- an adapter boundary that accepts `watch-commission@1` only through its
+  originating verifier.
 
-A mission manifest is a small, version-controlled document that answers:
-
-- **Intent** — what outcome the sovereign wants, in their words where possible.
-- **Scope** — inclusions, exclusions, and environments touched.
-- **Authorization** — what the steward may do without re-asking; what requires fresh consent.
-- **Evidence** — where proof of progress and completion must land.
-- **Stop / hold** — conditions that pause or end the mission.
-
-See [`docs/mission-manifest.md`](docs/mission-manifest.md) for the v0 field guide
-and template. The target machine-checkable carrier is `mission-manifest@1`.
-
-## Installation
-
-### Cursor
-
-Add this repository as a plugin source, or copy `skills/manifest/` into your
-project's skills directory. Reload the session so skill discovery runs.
-
-### Generic Agent Skills layout
-
-```text
-your-project/
-  .agents/skills/manifest/   # or your harness's skills root
-    SKILL.md
-```
-
-Point your harness at the skill root per its documentation.
-
-## Relationship to other ZMS packages
-
-- **[epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)** — what must be *true* before a claim bears load (including commission-watch).
-- **Practical Agency** — what a steward is *allowed* to do while pursuing a mission, and what must be *recorded* so work survives compaction.
-
-Use both when missions are consequential and claims must be defensible.
-`manifest` may custody a validated `watch-commission@1` record when installed
-with a compatible adapter; it must not promote commission state itself.
-
-## Developing
+Run the package-local deterministic gate:
 
 ```bash
 python -m unittest discover -s tests -p 'test_*.py' -v
-python -m compileall -q practical_agency tests
+python -m compileall -q practical_agency tests .github/scripts
+python .github/scripts/check_contracts.py
+python .github/scripts/check_package.py
+python .github/scripts/check_harness_surfaces.py
+python .github/scripts/check_public_content.py
 ```
 
-Deterministic mission custody is proven by the in-process end-to-end fixture.
-No production external execution adapter is included yet. No background service
-is claimed. Live harness loading is unverified until tested in each packaged
-harness. End-to-end mission benefit over an ordinary skilled agent remains
-unestablished until comparative evaluation exists.
+The permanent CI gate additionally checks out the commission-watch contract at
+immutable `epistemic-skills` revision
+`6e26484a9cae7629b233734fe5121137ba9168a8` and requires its actual semantic
+verifier and example corpus during the test run.
 
-Follow the [DCO](https://developercertificate.org/) sign-off on commits
-(`Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>` for
-maintainer commits on this program).
+## Commission-watch boundary
+
+Practical Agency does not become the observer. The upstream commission-watch
+discipline defines and proves the observation claim; an external mechanism does
+the actual between-session watching. Practical Agency may retain a validated
+commission, coordinate an authorized adapter, preserve receipts, and reopen a
+mission when a receipted crossing arrives.
+
+Pinned interoperability tests establish that:
+
+- the actual upstream accepted/rejected corpus keeps the same oracles when passed
+  through Practical Agency;
+- a `DECLARED` commission prepared by the Practical Agency adapter boundary is
+  accepted by the upstream verifier as `BLOCKED: KILL_SWITCH_UNPROVEN`; and
+- the upstream contract rejects `manifest` as a value of
+  `handoff.on_crossing`.
+
+That proves carrier/verifier compatibility at one immutable revision. It does
+**not** authenticate receipt references, commission a production observer, admit
+a production adapter, or create an automatic `watch` → `manifest` route.
+Post-crossing `triage` and `decision-ledger` classification remains separate from
+mission custody.
+
+## Repository map
+
+```text
+skills/manifest/                  sole public skill
+practical_agency/                 deterministic mission kernel
+contracts/                        portable JSON Schema carriers
+roles/                            steward and independent acceptor contracts
+adapters/                         optional execution boundary documentation
+examples/                         valid mission examples
+tests/                            deterministic, integration, and end-to-end fixtures
+```
+
+## Relationship to epistemic-skills
+
+[`epistemic-skills`](https://github.com/ZMS-Labs/epistemic-skills) governs what may
+honestly bear epistemic load. Practical Agency governs how an operator-authorized
+mission preserves continuity and advances through bounded action. Neither package
+absorbs the other's methods or verdicts.
 
 ## License
 

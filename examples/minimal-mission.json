@@ -6,22 +6,40 @@
     "operator_ref": "operator:test",
     "instruction": "Create and verify the example artifact.",
     "amendments": [],
-    "permissions": ["repository:write"],
-    "protected_state": ["unrelated files"],
-    "acceptable_costs": ["one feature branch"],
-    "escalation_required_for": ["destructive action"],
+    "permissions": [
+      "repository:write"
+    ],
+    "protected_state": [
+      "unrelated files"
+    ],
+    "acceptable_costs": [
+      "one feature branch"
+    ],
+    "escalation_required_for": [
+      "destructive action"
+    ],
     "revoked": false,
     "revocation_reason": null
   },
   "outcome": {
     "desired_state": "The example artifact exists and validates.",
-    "completion_proof": ["validator passes"],
-    "integrity_guards": ["runtime reads the canonical artifact"],
-    "scope_proof": ["diff contains only intended files"],
-    "stop_conditions": ["operator revokes authority"]
+    "completion_proof": [
+      "artifact:validator-pass"
+    ],
+    "integrity_guards": [
+      "runtime reads the canonical artifact"
+    ],
+    "scope_proof": [
+      "diff contains only intended files"
+    ],
+    "stop_conditions": [
+      "operator revokes authority"
+    ]
   },
   "truth": {
-    "subject_refs": ["repo:example@rev-1"],
+    "subject_refs": [
+      "repo:example@rev-1"
+    ],
     "verified_facts": [],
     "assumptions": [],
     "contradictions": [],
@@ -30,7 +48,9 @@
   "state": {
     "status": "draft",
     "completed_actions": [],
-    "current_frontier": ["obtain approval"],
+    "current_frontier": [
+      "obtain approval"
+    ],
     "blockers": [],
     "next_action": "obtain approval"
   },

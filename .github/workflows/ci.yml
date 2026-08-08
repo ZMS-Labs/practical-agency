@@ -1,90 +1,57 @@
 name: ci
 
-on:
+"on":
   workflow_dispatch:
+  pull_request:
   push:
     branches: [main]
-  pull_request:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  stdlib-checks:
+  deterministic-kernel:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Check out without persisted credentials
-        uses: actions/checkout@v4
+      - name: Check out tested revision without stored credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - name: Fetch pinned commission-watch contract outside product tree
+        run: |
+          upstream="$RUNNER_TEMP/epistemic-skills"
+          git init "$upstream"
+          git -C "$upstream" remote add origin https://github.com/ZMS-Labs/epistemic-skills.git
+          git -C "$upstream" fetch --depth=1 origin 6e26484a9cae7629b233734fe5121137ba9168a8
+          git -C "$upstream" checkout --detach 6e26484a9cae7629b233734fe5121137ba9168a8
+          test "$(git -C "$upstream" rev-parse HEAD)" = "6e26484a9cae7629b233734fe5121137ba9168a8"
+          echo "PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT=$upstream/plugins/epistemic-skills/contracts/watch-commission" >> "$GITHUB_ENV"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
-      - name: Unit tests
-        run: |
-          set +e
-          python -m unittest discover -s tests -p 'test_*.py' -v
-          code=$?
-          # unittest exits 5 when discovery finds no tests; treat that as green
-          # until the first behavior suite lands.
-          if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then
-            exit 0
-          fi
-          exit "$code"
-
-      - name: Compile package and tests
-        run: python -m compileall -q practical_agency tests
-
-      - name: Parse committed JSON
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          roots = [Path("."), Path(".cursor-plugin"), Path(".claude-plugin"), Path("contracts"), Path("examples")]
-          paths = []
-          for root in Path(".").rglob("*.json"):
-              if ".git" in root.parts:
-                  continue
-              paths.append(root)
-          for path in sorted(paths):
-              json.loads(path.read_text(encoding="utf-8"))
-              print(f"ok {path}")
-          print(f"parsed {len(paths)} json files")
-          PY
-
-      - name: Exactly one public skill named manifest
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          skills = sorted(Path("skills").glob("*/SKILL.md"))
-          names = [path.parent.name for path in skills]
-          assert names == ["manifest"], names
-          print("skill inventory ok: skills/manifest/SKILL.md")
-          PY
-
-  dco:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Check out without persisted credentials
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Author-matching DCO
+      - name: Unit, end-to-end, and pinned upstream interoperability tests
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_EVENT_PATH: ${{ github.event_path }}
-        run: python .github/scripts/check_dco.py
+          PRACTICAL_AGENCY_REQUIRE_UPSTREAM_WATCH: "1"
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile Python
+        run: python -m compileall -q practical_agency tests .github/scripts
+      - name: Contract and JSON checks
+        run: python .github/scripts/check_contracts.py
+      - name: Package surface and description budget
+        run: python .github/scripts/check_package.py
+      - name: Harness packaging surfaces and materialize oracle
+        run: |
+          python .github/scripts/check_harness_surfaces.py
+          python .github/scripts/check_harness_surfaces.py --materialize "$RUNNER_TEMP/pa-harness-materialize"
+      - name: Public-content boundary
+        run: python .github/scripts/check_public_content.py
+      - name: Build wheel without dependency resolution
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+      - name: Install and import the built wheel
+        shell: bash
+        run: |
+          rm -rf /tmp/practical-agency-wheel-test
+          python -m pip install --no-deps --target /tmp/practical-agency-wheel-test dist/*.whl
+          (cd /tmp && PYTHONPATH=/tmp/practical-agency-wheel-test python -c "import practical_agency; assert practical_agency.__version__ == '0.1.0'")

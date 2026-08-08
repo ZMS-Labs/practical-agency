@@ -1,13 +1,12 @@
-"""Dynamic capability discovery from installed skill roots."""
-
+"""Dynamic capability discovery without a copied member inventory."""
 from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 
 class Persistence(str, Enum):
@@ -36,111 +35,181 @@ class CapabilityProvider(Protocol):
     def discover(self) -> list[CapabilityDescriptor]: ...
 
 
-_FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
+_FRONTMATTER = re.compile(r"\A---\r?\n(?P<body>.*?)\r?\n---(?:\r?\n|\Z)", re.S)
+_SUPPORTED_TOP = {"name", "description", "metadata"}
+_SUPPORTED_METADATA = {
+    "kind",
+    "persistence",
+    "independence",
+    "authority_required",
+    "input_contract",
+    "output_contract",
+}
 
 
-def _parse_simple_frontmatter(text: str) -> dict[str, str] | None:
-    """Parse a deliberately small subset of YAML frontmatter.
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
 
-    Supports only top-level `key: value` scalars. Nested structures, lists,
-    and flow indicators fail closed.
-    """
+
+def _list_scalar(value: str) -> tuple[str, ...]:
+    value = value.strip()
+    if not (value.startswith("[") and value.endswith("]")):
+        raise ValueError("UNSUPPORTED_LIST_SYNTAX")
+    inner = value[1:-1].strip()
+    if not inner:
+        return ()
+    return tuple(_unquote(part.strip()) for part in inner.split(","))
+
+
+def _parse_frontmatter(text: str) -> dict[str, object]:
     match = _FRONTMATTER.match(text)
     if not match:
-        return None
-    body = match.group(1)
-    result: dict[str, str] = {}
-    for raw_line in body.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+        raise ValueError("MALFORMED_FRONTMATTER")
+    result: dict[str, object] = {}
+    metadata: dict[str, object] = {}
+    in_metadata = False
+    for raw in match.group("body").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        if line.startswith("-") or ":" not in line:
-            return None
-        key, value = line.split(":", 1)
+        if raw.startswith((" ", "\t")):
+            if not in_metadata or not raw.startswith("  ") or raw.startswith("   "):
+                raise ValueError("UNSUPPORTED_FRONTMATTER_INDENTATION")
+            line = raw[2:]
+            if ":" not in line:
+                raise ValueError("MALFORMED_METADATA")
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key not in _SUPPORTED_METADATA:
+                raise ValueError(f"UNSUPPORTED_METADATA_KEY:{key}")
+            if value.strip() in {"|", ">"}:
+                raise ValueError("UNSUPPORTED_MULTILINE_SCALAR")
+            metadata[key] = (
+                _list_scalar(value)
+                if key == "authority_required"
+                else _unquote(value)
+            )
+            continue
+        in_metadata = False
+        if ":" not in raw:
+            raise ValueError("MALFORMED_FRONTMATTER_LINE")
+        key, value = raw.split(":", 1)
         key = key.strip()
-        value = value.strip()
-        if not key or any(ch in key for ch in "[]{}"):
-            return None
-        if value.startswith(("[", "{")) or value.endswith(("]", "}")):
-            return None
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
-            value = value[1:-1]
-        result[key] = value
+        if key not in _SUPPORTED_TOP:
+            raise ValueError(f"UNSUPPORTED_FRONTMATTER_KEY:{key}")
+        if key == "metadata":
+            if value.strip():
+                raise ValueError("METADATA_MUST_BE_MAPPING")
+            in_metadata = True
+            result["metadata"] = metadata
+        else:
+            if value.strip() in {"|", ">"}:
+                raise ValueError("UNSUPPORTED_MULTILINE_SCALAR")
+            result[key] = _unquote(value)
+    result.setdefault("metadata", metadata)
     return result
+
+
+def _degraded(path: Path, digest: str, reason: str) -> CapabilityDescriptor:
+    return CapabilityDescriptor(
+        capability_id=path.parent.name,
+        kind="skill",
+        source_ref=str(path.resolve()),
+        source_sha256=digest,
+        description="",
+        input_contract=None,
+        output_contract=None,
+        authority_required=(),
+        persistence=Persistence.PROMPT,
+        independence="either",
+        availability="degraded",
+        degradation_reason=reason,
+    )
 
 
 class FileSystemSkillProvider:
     def __init__(self, root: Path) -> None:
-        self.root = Path(root)
+        self.root = root
 
     def discover(self) -> list[CapabilityDescriptor]:
-        descriptors: list[CapabilityDescriptor] = []
-        if not self.root.is_dir():
-            return descriptors
-        for child in sorted(self.root.iterdir(), key=lambda path: path.name):
-            skill = child / "SKILL.md"
-            if not child.is_dir() or not skill.is_file():
+        found: list[CapabilityDescriptor] = []
+        if not self.root.exists():
+            return found
+        for child in sorted(path for path in self.root.iterdir() if path.is_dir()):
+            path = child / "SKILL.md"
+            if not path.is_file():
                 continue
-            text = skill.read_text(encoding="utf-8")
-            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            parsed = _parse_simple_frontmatter(text)
-            if parsed is None:
-                descriptors.append(
-                    CapabilityDescriptor(
-                        capability_id=child.name,
-                        kind="skill",
-                        source_ref=str(skill),
-                        source_sha256=digest,
-                        description="",
-                        input_contract=None,
-                        output_contract=None,
-                        authority_required=(),
-                        persistence=Persistence.PROMPT,
-                        independence="member",
-                        availability="degraded",
-                        degradation_reason="FRONTMATTER_PARSE_FAILED",
-                    )
-                )
+            raw = path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            try:
+                parsed = _parse_frontmatter(raw.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError) as error:
+                found.append(_degraded(path, digest, str(error)))
                 continue
-            name = (parsed.get("name") or child.name).strip()
-            description = (parsed.get("description") or "").strip()
+            metadata = parsed.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            capability_id = str(parsed.get("name") or child.name).strip()
+            description = str(parsed.get("description") or "").strip()
+            try:
+                persistence = Persistence(str(metadata.get("persistence") or "prompt"))
+            except ValueError:
+                found.append(_degraded(path, digest, "INVALID_PERSISTENCE"))
+                continue
             availability = "available"
-            reason = None
-            if not description:
+            degradation: str | None = None
+            if not capability_id:
+                capability_id = child.name
                 availability = "unavailable"
-                reason = "EMPTY_DESCRIPTION"
-            descriptors.append(
+                degradation = "EMPTY_CAPABILITY_ID"
+            elif not description:
+                availability = "unavailable"
+                degradation = "EMPTY_DESCRIPTION"
+            authority = metadata.get("authority_required", ())
+            if not isinstance(authority, tuple):
+                authority = ()
+            found.append(
                 CapabilityDescriptor(
-                    capability_id=name,
-                    kind="skill",
-                    source_ref=str(skill),
+                    capability_id=capability_id,
+                    kind=str(metadata.get("kind") or "skill"),
+                    source_ref=str(path.resolve()),
                     source_sha256=digest,
                     description=description,
-                    input_contract=None,
-                    output_contract=None,
-                    authority_required=(),
-                    persistence=Persistence.PROMPT,
-                    independence="member",
+                    input_contract=(
+                        str(metadata["input_contract"])
+                        if metadata.get("input_contract")
+                        else None
+                    ),
+                    output_contract=(
+                        str(metadata["output_contract"])
+                        if metadata.get("output_contract")
+                        else None
+                    ),
+                    authority_required=tuple(str(item) for item in authority),
+                    persistence=persistence,
+                    independence=str(metadata.get("independence") or "either"),
                     availability=availability,
-                    degradation_reason=reason,
+                    degradation_reason=degradation,
                 )
             )
-        return descriptors
+        return found
 
 
-def discover_capabilities(roots: Iterable[Path]) -> list[CapabilityDescriptor]:
-    found: list[CapabilityDescriptor] = []
-    seen: dict[str, CapabilityDescriptor] = {}
-    for root in roots:
-        for descriptor in FileSystemSkillProvider(Path(root)).discover():
-            prior = seen.get(descriptor.capability_id)
-            if prior is not None and prior.source_ref != descriptor.source_ref:
-                raise ValueError(
-                    f"CAPABILITY_ID_CONFLICT: {descriptor.capability_id} found at "
-                    f"{prior.source_ref} and {descriptor.source_ref}"
-                )
-            seen[descriptor.capability_id] = descriptor
-            found.append(descriptor)
-    return sorted(found, key=lambda item: item.capability_id)
+def discover_capabilities(providers: list[CapabilityProvider]) -> list[CapabilityDescriptor]:
+    found = [item for provider in providers for item in provider.discover()]
+    counts: dict[str, int] = {}
+    for item in found:
+        counts[item.capability_id] = counts.get(item.capability_id, 0) + 1
+    normalized = [
+        replace(
+            item,
+            availability="unavailable",
+            degradation_reason="DUPLICATE_CAPABILITY_ID",
+        )
+        if counts[item.capability_id] > 1
+        else item
+        for item in found
+    ]
+    return sorted(normalized, key=lambda item: (item.capability_id, item.source_ref))
