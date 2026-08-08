@@ -3,7 +3,8 @@
 **Purpose:** discharge P2-HARNESS-LOAD with honest tiers. A tier records what was
 actually exercised. It does not upgrade a blocked live check into a pass.
 
-**Subject tip:**  (climb PR head containing this matrix).
+**Subject tip:** `ab5b8b3e2436a67cf8a922419230bf6696537c93` (feat commit with LIVE
+oracle; later commits on this branch are docs/contract fixes only).
 
 ## Tier vocabulary
 
