@@ -74,6 +74,9 @@ Gauntlet, and anti-claims are in
 
 Do **not** rename or retag `0.1.0` as `1.0.0`.
 
+For the operator test of whether `manifest` is worth using (versus a goal skill or ordinary agent), see [MANIFEST-TEETH.md](MANIFEST-TEETH.md).
+
+
 ## Public contract freeze at 1.0
 
 While the major line is `1.x`:
