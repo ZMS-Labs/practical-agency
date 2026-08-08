@@ -133,12 +133,17 @@ def decode_mission_os_proposal(
     }
     if raw.get("payload_sha256") != _canonical_sha256(signed):
         raise ValueError("MISSION_OS_PROPOSAL_HASH_MISMATCH")
+    decoded_content = dict(content)
+    if kind == "replan_slice":
+        validate_contradiction_refs(
+            manifest, decoded_content.get("contradiction_refs")
+        )
     metadata = {
         "proposal_id": proposal_id,
         "base_revision": base_revision,
         "payload_sha256": raw["payload_sha256"],
     }
-    return kind, deepcopy(dict(content)), metadata
+    return kind, deepcopy(decoded_content), metadata
 
 
 def _return_point_dict(manifest: MissionManifest, frontier_index: int) -> dict[str, Any]:
@@ -227,6 +232,42 @@ def validate_basis_refs(manifest: MissionManifest, basis_refs: object) -> list[s
     if unresolved:
         raise ValueError("MISSION_OS_BASIS_UNRESOLVED:" + ",".join(unresolved))
     return list(basis_refs)
+
+
+def available_contradiction_refs(manifest: MissionManifest) -> set[str]:
+    """Return references that can truthfully authorize a contradiction replan."""
+    refs: set[str] = set()
+    for item in manifest.truth.get("contradictions") or []:
+        if isinstance(item, str) and item.strip():
+            refs.add(item)
+        elif isinstance(item, Mapping):
+            for key in ("ref", "subject_ref", "event_ref"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    refs.add(value)
+    for handoff in manifest.continuity.get("external_handoffs") or []:
+        if not isinstance(handoff, Mapping) or handoff.get("kind") != "watch-crossing":
+            continue
+        event_ref = handoff.get("event_ref")
+        if isinstance(event_ref, str) and event_ref.strip():
+            refs.add(event_ref)
+    return refs
+
+
+def validate_contradiction_refs(
+    manifest: MissionManifest, contradiction_refs: object
+) -> list[str]:
+    if not isinstance(contradiction_refs, list) or not contradiction_refs or any(
+        not isinstance(ref, str) or not ref.strip() for ref in contradiction_refs
+    ):
+        raise ValueError("REPLAN_CONTRADICTION_REQUIRED")
+    available = available_contradiction_refs(manifest)
+    unresolved = [ref for ref in contradiction_refs if ref not in available]
+    if unresolved:
+        raise ValueError(
+            "REPLAN_CONTRADICTION_UNRESOLVED:" + ",".join(unresolved)
+        )
+    return list(contradiction_refs)
 
 
 def _unmet_proof_tokens(
@@ -327,10 +368,8 @@ def propose_replan_slice(
     replace_range: tuple[int, int] | None = None,
     forbidden_substrings: Sequence[str] = (),
 ) -> MissionOsProposal:
-    if not contradiction_refs:
-        raise ValueError("REPLAN_CONTRADICTION_REQUIRED")
-    validate_basis_refs(manifest, contradiction_refs)
-    merged_basis = list(dict.fromkeys((basis_refs or []) + contradiction_refs))
+    contradictions = validate_contradiction_refs(manifest, contradiction_refs)
+    merged_basis = list(dict.fromkeys((basis_refs or []) + contradictions))
     proposal = propose_frontier_patch(
         manifest,
         new_frontier,
@@ -343,7 +382,7 @@ def propose_replan_slice(
         "replan_slice",
         {
             **proposal.content,
-            "contradiction_refs": list(contradiction_refs),
+            "contradiction_refs": contradictions,
         },
     )
 
