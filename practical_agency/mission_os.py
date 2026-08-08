@@ -267,6 +267,41 @@ def validate_contradiction_refs(
         raise ValueError(
             "REPLAN_CONTRADICTION_UNRESOLVED:" + ",".join(unresolved)
         )
+
+    completed_crossing_refs: set[str] = set()
+    for handoff in manifest.continuity.get("external_handoffs") or []:
+        if not isinstance(handoff, Mapping) or handoff.get("kind") != "watch-crossing":
+            continue
+        return_point = handoff.get("return_point")
+        event_ref = handoff.get("event_ref")
+        if (
+            isinstance(return_point, Mapping)
+            and return_point.get("status") == "completed"
+            and isinstance(event_ref, str)
+            and event_ref.strip()
+        ):
+            completed_crossing_refs.add(event_ref)
+
+    consumed_crossing_refs: set[str] = set()
+    for decision in manifest.continuity.get("decisions") or []:
+        if (
+            not isinstance(decision, Mapping)
+            or decision.get("kind") != "mission-os-apply"
+            or decision.get("proposal_kind") != "replan_slice"
+        ):
+            continue
+        decision_refs = decision.get("contradiction_refs")
+        if not isinstance(decision_refs, list):
+            continue
+        for ref in decision_refs:
+            if isinstance(ref, str) and ref in completed_crossing_refs:
+                consumed_crossing_refs.add(ref)
+
+    reused = [ref for ref in contradiction_refs if ref in consumed_crossing_refs]
+    if reused:
+        raise ValueError(
+            "WATCH_CROSSING_ALREADY_CONSUMED:" + ",".join(reused)
+        )
     return list(contradiction_refs)
 
 
