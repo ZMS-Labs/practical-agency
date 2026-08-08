@@ -1,11 +1,17 @@
 """Adapter boundary for externally verified watch-commission@1 records."""
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol
 
 from practical_agency.manifest_model import MissionManifest, MissionStatus
+from practical_agency.state_machine import (
+    MISSION_STEWARD_REF,
+    TransitionError,
+    apply_event_data,
+)
 
 
 class CommissionIntegrationError(RuntimeError):
@@ -245,32 +251,39 @@ def handle_crossing_event(
     ):
         raise CommissionIntegrationError("COMMISSION_NOT_OPERATING")
 
-    data = manifest.to_dict()
-    data["continuity"]["external_handoffs"].append(
-        {
-            "kind": "watch-crossing",
-            "commission_id": commission_id,
-            "event_ref": event_ref,
-            "observed_at": observed_at,
-            "condition": (
-                f"Commission {commission_id} observed a bound crossing; "
-                "its consequences for the authorized mission remain unresolved."
-            ),
-            "expected_output_contract": (
-                "Return a revision-bound mission-OS replan proposal citing "
-                "this event_ref, or a durable decision that no replan is required."
-            ),
-            "return_point": {
-                "mission_id": manifest.mission_id,
-                "mission_revision": manifest.revision,
-                "status": manifest.state.get("status"),
-            },
-        }
-    )
-    # Crossing ingestion owns only its durable observation. The steward remains
-    # the sole writer of status, frontier, and next-action state.
-    data["revision"] = manifest.revision + 1
-    return MissionManifest.from_dict(data)
+    handoff = {
+        "kind": "watch-crossing",
+        "commission_id": commission_id,
+        "event_ref": event_ref,
+        "observed_at": observed_at,
+        "condition": (
+            f"Commission {commission_id} observed a bound crossing; "
+            "its consequences for the authorized mission remain unresolved."
+        ),
+        "expected_output_contract": (
+            "Return a revision-bound mission-OS replan proposal citing "
+            "this event_ref, or a durable decision that no replan is required."
+        ),
+        "return_point": {
+            "mission_id": manifest.mission_id,
+            "mission_revision": manifest.revision,
+            "status": manifest.state.get("status"),
+        },
+    }
+    event_fingerprint = hashlib.sha256(
+        f"{manifest.mission_id}\0{commission_id}\0{event_ref}".encode("utf-8")
+    ).hexdigest()
+    try:
+        return apply_event_data(
+            manifest,
+            "record_watch_crossing",
+            MISSION_STEWARD_REF,
+            {"handoff": handoff},
+            event_id=f"watch-crossing:{event_fingerprint}",
+            observed_at=observed_at,
+        )
+    except TransitionError as exc:
+        raise CommissionIntegrationError(str(exc)) from exc
 
 
 def disable_commissions_for_revocation(

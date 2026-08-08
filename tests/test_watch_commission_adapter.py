@@ -260,6 +260,39 @@ class WatchCommissionAdapterTests(unittest.TestCase):
                 },
             )
 
+    def test_crossing_event_is_revision_bound_and_replay_safe(self) -> None:
+        payload = clone_payload()
+        payload["revision"] = 5
+        payload["state"]["status"] = "completed"
+        payload["state"]["current_frontier"] = []
+        payload["state"]["next_action"] = None
+        payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        payload["continuity"]["watch_commissions"] = [
+            {
+                "commission_id": "wc-1",
+                "state": "PROVEN",
+                "external_observer": {"enabled": True},
+            }
+        ]
+        manifest = MissionManifest.from_dict(payload)
+        event = {
+            "commission_id": "wc-1",
+            "event_ref": "external-event://replay-safe",
+            "observed_at": "2026-08-07T13:00:00Z",
+        }
+
+        observed = handle_crossing_event(manifest, event)
+        self.assertEqual(observed.revision, 6)
+        self.assertTrue(
+            any(
+                event_id.startswith("watch-crossing:")
+                for event_id in observed.continuity["processed_event_ids"]
+            )
+        )
+        with self.assertRaisesRegex(CommissionIntegrationError, "EVENT_REPLAY"):
+            handle_crossing_event(observed, event)
+
     def test_revocation_disables_retained_mechanisms(self) -> None:
         payload = clone_payload()
         payload["authority"]["revoked"] = True
