@@ -27,7 +27,7 @@ There is **no production external execution adapter** in v0.1.
 Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
 (see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
 Customize→Skills panel and Claude live load remain unverified.
-Comparative benefit over an ordinary capable agent is also unestablished
+comparative benefit over an ordinary capable agent is also unestablished
 until a controlled evaluation exists.
 
 `1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
