@@ -1,7 +1,8 @@
 # Mission OS and Manifest v1 — design
 
 **Date:** 2026-08-08  
-**Status:** operator-accepted 2026-08-08 (amended tip `f93f964`; implementation plan `docs/superpowers/plans/2026-08-08-mission-os-first-slice.md`)  
+**Status:** operator-accepted 2026-08-08 (gauntlet-amended tip `ec7f95f`;
+implementation plan `docs/superpowers/plans/2026-08-08-mission-os-first-slice.md`)  
 **Orchestration note:** packaging directions came from brainstorming; P1
 hardening from gauntlet; operator durable assent recorded in-session 2026-08-08
 (“yes”) — authoring session still must not self-accept *implementation*  
@@ -307,6 +308,6 @@ Authoring-session checklist alone is not acceptance.
 | Metacognate | Fired — design approval is high-blast / architecture commit |
 | Gauntlet | `docs/gauntlet-runs/mission-os-v1-design-2026-08-08/` |
 | Unamended verdict | **NO-GO** |
-| Amended tip | `f93f964` — design accept bound to implementation plan tip |
+| Amended tip | `ec7f95f` — P1 gauntlet amendments (accept target) |
 | Operator accept | yes — chat 2026-08-08 (amended design) |
 | Implementation plan | `docs/superpowers/plans/2026-08-08-mission-os-first-slice.md` |
