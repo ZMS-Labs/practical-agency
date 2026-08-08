@@ -65,26 +65,49 @@ def _list_scalar(value: str) -> tuple[str, ...]:
 
 
 def _parse_frontmatter(text: str) -> dict[str, object]:
+    """Parse governed fields while treating additive fields as opaque metadata.
+
+    Recognized fields remain strict because they affect authority and dispatch.
+    Unknown top-level or metadata keys are deliberately ignored so upstream
+    descriptors may add non-authoritative metadata without degrading discovery.
+    """
+
     match = _FRONTMATTER.match(text)
     if not match:
         raise ValueError("MALFORMED_FRONTMATTER")
+
     result: dict[str, object] = {}
     metadata: dict[str, object] = {}
     in_metadata = False
+    skip_nested_after_indent: int | None = None
+
     for raw in match.group("body").splitlines():
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
-        if raw.startswith((" ", "\t")):
-            if not in_metadata or not raw.startswith("  ") or raw.startswith("   "):
+
+        indent = len(raw) - len(raw.lstrip(" "))
+        if raw.startswith("\t"):
+            raise ValueError("UNSUPPORTED_FRONTMATTER_INDENTATION")
+
+        if skip_nested_after_indent is not None:
+            if indent > skip_nested_after_indent:
+                continue
+            skip_nested_after_indent = None
+
+        if indent:
+            if not in_metadata or indent != 2:
                 raise ValueError("UNSUPPORTED_FRONTMATTER_INDENTATION")
             line = raw[2:]
             if ":" not in line:
                 raise ValueError("MALFORMED_METADATA")
             key, value = line.split(":", 1)
             key = key.strip()
+            scalar = value.strip()
             if key not in _SUPPORTED_METADATA:
-                raise ValueError(f"UNSUPPORTED_METADATA_KEY:{key}")
-            if value.strip() in {"|", ">"}:
+                if not scalar or scalar in {"|", ">"}:
+                    skip_nested_after_indent = indent
+                continue
+            if scalar in {"|", ">"}:
                 raise ValueError("UNSUPPORTED_MULTILINE_SCALAR")
             metadata[key] = (
                 _list_scalar(value)
@@ -92,22 +115,27 @@ def _parse_frontmatter(text: str) -> dict[str, object]:
                 else _unquote(value)
             )
             continue
+
         in_metadata = False
         if ":" not in raw:
             raise ValueError("MALFORMED_FRONTMATTER_LINE")
         key, value = raw.split(":", 1)
         key = key.strip()
+        scalar = value.strip()
         if key not in _SUPPORTED_TOP:
-            raise ValueError(f"UNSUPPORTED_FRONTMATTER_KEY:{key}")
+            if not scalar or scalar in {"|", ">"}:
+                skip_nested_after_indent = indent
+            continue
         if key == "metadata":
-            if value.strip():
+            if scalar:
                 raise ValueError("METADATA_MUST_BE_MAPPING")
             in_metadata = True
             result["metadata"] = metadata
         else:
-            if value.strip() in {"|", ">"}:
+            if scalar in {"|", ">"}:
                 raise ValueError("UNSUPPORTED_MULTILINE_SCALAR")
             result[key] = _unquote(value)
+
     result.setdefault("metadata", metadata)
     return result
 

@@ -39,6 +39,9 @@ class CoordinationDecision:
 
 
 class ExecutionAdapter(Protocol):
+    capability_id: str
+    adapter_ref: str
+
     def dispatch(self, request: dict[str, Any]) -> dict[str, Any]: ...
 
 
@@ -48,6 +51,12 @@ _EXECUTION_INPUT_FIELDS = {
     "requested_effects",
     "estimated_costs",
     "action",
+}
+_EXECUTION_REQUEST_FIELDS = _EXECUTION_INPUT_FIELDS | {
+    "schema",
+    "request_id",
+    "mission_id",
+    "mission_revision",
 }
 _EXECUTION_RECEIPT_FIELDS = {
     "schema",
@@ -96,13 +105,30 @@ def _return_point(
     manifest: MissionManifest, frontier_index: int
 ) -> ReturnPoint:
     frontier = manifest.state.get("current_frontier", [])
-    if isinstance(frontier, list) and 0 <= frontier_index < len(frontier):
-        label = str(frontier[frontier_index])
-    else:
-        label = str(manifest.state.get("next_action") or "resume mission")
+    if (
+        isinstance(frontier_index, bool)
+        or not isinstance(frontier_index, int)
+        or not isinstance(frontier, list)
+        or frontier_index < 0
+        or frontier_index >= len(frontier)
+    ):
+        raise CoordinationError("INVALID_FRONTIER_INDEX")
+    label = frontier[frontier_index]
+    if not _nonempty_string(label):
+        raise CoordinationError("INVALID_FRONTIER_INDEX")
     return ReturnPoint(
-        manifest.mission_id, manifest.revision, frontier_index, label
+        manifest.mission_id, manifest.revision, frontier_index, str(label)
     )
+
+
+def _decision_block(
+    reason: str, manifest: MissionManifest, frontier_index: int
+) -> CoordinationDecision:
+    try:
+        point = _return_point(manifest, frontier_index)
+    except CoordinationError:
+        point = None
+    return CoordinationDecision("BLOCK", reason, None, point)
 
 
 def _request_id(
@@ -168,12 +194,21 @@ def coordinate_once(
     completion_proposed: bool = False,
     require_applied_frontier: bool = False,
 ) -> CoordinationDecision:
+    # Kept for source compatibility; the hard gate is no longer caller-optional.
+    del require_applied_frontier
+
     if manifest.state.get("status") != MissionStatus.ACTIVE.value:
         return CoordinationDecision(
             "BLOCK",
             f"MISSION_NOT_ACTIVE:{manifest.state.get('status')}",
             None,
             None,
+        )
+
+    consumes_frontier = unresolved_condition is not None or execution_request is not None
+    if consumes_frontier and not _frontier_apply_present(manifest):
+        return _decision_block(
+            "MISSION_OS_APPLY_REQUIRED", manifest, frontier_index
         )
 
     remediation_reason = _pending_remediation_reason(manifest)
@@ -185,19 +220,20 @@ def coordinate_once(
             else None
         )
         if supplied_action != expected_action or not _nonempty_string(expected_action):
-            return CoordinationDecision(
-                "BLOCK",
-                remediation_reason,
-                None,
-                _return_point(manifest, frontier_index),
+            return _decision_block(
+                remediation_reason, manifest, frontier_index
             )
 
     if completion_proposed:
+        try:
+            point = _return_point(manifest, frontier_index)
+        except CoordinationError as error:
+            return CoordinationDecision("BLOCK", str(error), None, None)
         return CoordinationDecision(
             "VERIFY",
             "MATERIAL_COMPLETION_REQUIRES_INDEPENDENT_ACCEPTANCE",
             {"mission_id": manifest.mission_id, "revision": manifest.revision},
-            _return_point(manifest, frontier_index),
+            point,
         )
 
     if unresolved_condition is not None:
@@ -207,13 +243,17 @@ def coordinate_once(
             return CoordinationDecision(
                 "BLOCK", "NO_CAPABILITY_SELECTED_FOR_CONDITION", None, None
             )
+        try:
+            point = _return_point(manifest, frontier_index)
+        except CoordinationError as error:
+            return CoordinationDecision("BLOCK", str(error), None, None)
         if selected_capability.availability != "available":
             return CoordinationDecision(
                 "BLOCK",
                 f"CAPABILITY_UNAVAILABLE:{selected_capability.capability_id}:"
                 f"{selected_capability.degradation_reason or selected_capability.availability}",
                 None,
-                _return_point(manifest, frontier_index),
+                point,
             )
         authority_errors = authorize_action(
             manifest,
@@ -224,9 +264,8 @@ def coordinate_once(
         )
         if authority_errors:
             return CoordinationDecision(
-                "BLOCK", " | ".join(authority_errors), None, _return_point(manifest, frontier_index)
+                "BLOCK", " | ".join(authority_errors), None, point
             )
-        point = _return_point(manifest, frontier_index)
         request_id = _request_id(
             manifest, selected_capability.capability_id, frontier_index, "capability"
         )
@@ -249,19 +288,16 @@ def coordinate_once(
         return CoordinationDecision("REQUEST_CAPABILITY", reason, request, point)
 
     if execution_request is not None:
-        if require_applied_frontier and not _frontier_apply_present(manifest):
-            return CoordinationDecision(
-                "BLOCK",
-                "MISSION_OS_APPLY_REQUIRED",
-                None,
-                _return_point(manifest, frontier_index),
-            )
         raw_request = deepcopy(dict(execution_request))
         invalid_field = _valid_execution_input(raw_request)
         if invalid_field is not None:
             return CoordinationDecision(
                 "BLOCK", f"INVALID_EXECUTION_REQUEST:{invalid_field}", None, None
             )
+        try:
+            point = _return_point(manifest, frontier_index)
+        except CoordinationError as error:
+            return CoordinationDecision("BLOCK", str(error), None, None)
         capability_id = raw_request["capability_id"]
         errors = authorize_action(
             manifest,
@@ -271,7 +307,7 @@ def coordinate_once(
             raw_request["estimated_costs"],
         )
         if errors:
-            return CoordinationDecision("BLOCK", " | ".join(errors), None, None)
+            return CoordinationDecision("BLOCK", " | ".join(errors), None, point)
         request = {
             "schema": "execution-request@1",
             "request_id": _request_id(
@@ -284,17 +320,63 @@ def coordinate_once(
         reason = "AUTHORIZED_DISPATCH"
         if checkpoint_store is None:
             reason += ":SESSION_BOUNDED_NO_CHECKPOINT_STORE"
-        return CoordinationDecision(
-            "DISPATCH", reason, request, _return_point(manifest, frontier_index)
-        )
+        return CoordinationDecision("DISPATCH", reason, request, point)
 
     return CoordinationDecision("NOOP", "NO_BOUNDED_NEXT_ACTION", None, None)
+
+
+def _validate_execution_envelope(
+    manifest: MissionManifest,
+    decision: CoordinationDecision,
+) -> dict[str, Any]:
+    if decision.request is None:
+        raise CoordinationError("DECISION_NOT_DISPATCHABLE")
+    request = decision.request
+    if set(request) != _EXECUTION_REQUEST_FIELDS:
+        raise CoordinationError("INVALID_EXECUTION_REQUEST:fields")
+    if request.get("schema") != "execution-request@1":
+        raise CoordinationError("INVALID_EXECUTION_REQUEST:schema")
+    if request.get("mission_id") != manifest.mission_id:
+        raise CoordinationError("MISSION_ID_MISMATCH")
+    if request.get("mission_revision") != manifest.revision:
+        raise CoordinationError("MISSION_REVISION_MISMATCH")
+    if decision.return_point is None:
+        raise CoordinationError("RETURN_POINT_REQUIRED")
+    live_point = _return_point(manifest, decision.return_point.frontier_index)
+    if live_point != decision.return_point:
+        raise CoordinationError("RETURN_POINT_MISMATCH")
+    input_request = {field: request[field] for field in _EXECUTION_INPUT_FIELDS}
+    invalid_field = _valid_execution_input(input_request)
+    if invalid_field is not None:
+        raise CoordinationError(f"INVALID_EXECUTION_REQUEST:{invalid_field}")
+    expected_id = _request_id(
+        manifest,
+        str(request["capability_id"]),
+        decision.return_point.frontier_index,
+        "execution",
+    )
+    if request.get("request_id") != expected_id:
+        raise CoordinationError("EXECUTION_REQUEST_ID_MISMATCH")
+    if not _frontier_apply_present(manifest):
+        raise CoordinationError("MISSION_OS_APPLY_REQUIRED")
+    errors = authorize_action(
+        manifest,
+        str(request["capability_id"]),
+        request["requested_permissions"],
+        request["requested_effects"],
+        request["estimated_costs"],
+    )
+    if errors:
+        raise CoordinationError(" | ".join(errors))
+    return deepcopy(request)
 
 
 def _validate_execution_receipt(
     result: Mapping[str, Any],
     manifest: MissionManifest,
     request: Mapping[str, Any],
+    *,
+    adapter_ref: str,
 ) -> None:
     if set(result) != _EXECUTION_RECEIPT_FIELDS:
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:fields")
@@ -306,8 +388,8 @@ def _validate_execution_receipt(
         raise CoordinationError("EXECUTION_RECEIPT_MISSION_MISMATCH")
     if result.get("mission_revision") != manifest.revision:
         raise CoordinationError("EXECUTION_RECEIPT_REVISION_MISMATCH")
-    if not _nonempty_string(result.get("adapter_ref")):
-        raise CoordinationError("INVALID_EXECUTION_RECEIPT:adapter_ref")
+    if result.get("adapter_ref") != adapter_ref:
+        raise CoordinationError("EXECUTION_RECEIPT_ADAPTER_MISMATCH")
     if result.get("status") not in _RESULT_STATUSES:
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:status")
     if not _string_list(result.get("artifact_refs")):
@@ -317,6 +399,8 @@ def _validate_execution_receipt(
     external_ref = result.get("external_receipt_ref")
     if external_ref is not None and not _nonempty_string(external_ref):
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:external_receipt_ref")
+    if result.get("status") == "completed" and not _nonempty_string(external_ref):
+        raise CoordinationError("EXTERNAL_EXECUTION_RECEIPT_REQUIRED")
     if not _string_list(result.get("coverage_limits")):
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:coverage_limits")
 
@@ -326,33 +410,48 @@ def dispatch_once(
     decision: CoordinationDecision,
     adapter: ExecutionAdapter,
 ) -> dict[str, Any]:
-    if decision.kind != "DISPATCH" or decision.request is None:
+    if decision.kind != "DISPATCH":
         raise CoordinationError("DECISION_NOT_DISPATCHABLE")
-    if decision.request.get("mission_id") != manifest.mission_id:
-        raise CoordinationError("MISSION_ID_MISMATCH")
-    if decision.request.get("mission_revision") != manifest.revision:
-        raise CoordinationError("MISSION_REVISION_MISMATCH")
+    request = _validate_execution_envelope(manifest, decision)
+
     remediation_reason = _pending_remediation_reason(manifest)
     if remediation_reason is not None:
         expected_action = manifest.state.get("next_action")
-        supplied_action = decision.request.get("action")
+        supplied_action = request.get("action")
         if supplied_action != expected_action or not _nonempty_string(expected_action):
             raise CoordinationError(remediation_reason)
-    result = adapter.dispatch(deepcopy(decision.request))
+
+    adapter_capability = getattr(adapter, "capability_id", None)
+    adapter_ref = getattr(adapter, "adapter_ref", None)
+    if not _nonempty_string(adapter_capability) or not _nonempty_string(adapter_ref):
+        raise CoordinationError("ADAPTER_IDENTITY_REQUIRED")
+    if adapter_capability != request.get("capability_id"):
+        raise CoordinationError(
+            f"ADAPTER_CAPABILITY_MISMATCH:{adapter_capability}!={request.get('capability_id')}"
+        )
+
+    result = adapter.dispatch(deepcopy(request))
     if not isinstance(result, dict):
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:root")
-    _validate_execution_receipt(result, manifest, decision.request)
+    _validate_execution_receipt(
+        result, manifest, request, adapter_ref=str(adapter_ref)
+    )
     return deepcopy(result)
 
 
 def _validate_capability_result(
     result: Mapping[str, Any], decision: CoordinationDecision
 ) -> None:
-    if set(result) - _CAPABILITY_RESULT_ALLOWED or not _CAPABILITY_RESULT_REQUIRED.issubset(result):
+    if (
+        set(result) - _CAPABILITY_RESULT_ALLOWED
+        or not _CAPABILITY_RESULT_REQUIRED.issubset(result)
+    ):
         raise CoordinationError("INVALID_CAPABILITY_RESULT:fields")
     if result.get("schema") != "capability-result@1":
         raise CoordinationError("INVALID_CAPABILITY_RESULT:schema")
-    if result.get("request_id") != decision.request.get("request_id"):
+    if decision.request is None or result.get("request_id") != decision.request.get(
+        "request_id"
+    ):
         raise CoordinationError("CAPABILITY_RESULT_REQUEST_MISMATCH")
     if result.get("status") not in _RESULT_STATUSES:
         raise CoordinationError("INVALID_CAPABILITY_RESULT:status")
@@ -365,7 +464,9 @@ def _validate_capability_result(
         raise CoordinationError("INVALID_CAPABILITY_RESULT:observed_effects")
     if not _string_list(result.get("coverage_limits")):
         raise CoordinationError("INVALID_CAPABILITY_RESULT:coverage_limits")
-    if result.get("returned_control_point") != decision.return_point.to_dict():
+    if decision.return_point is None or result.get(
+        "returned_control_point"
+    ) != decision.return_point.to_dict():
         raise CoordinationError("RETURN_POINT_MISMATCH")
 
 
