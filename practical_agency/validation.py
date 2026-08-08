@@ -1,14 +1,15 @@
-"""Semantic validation for mission-manifest@1."""
-
+"""Fail-closed semantic validation for mission-manifest@1."""
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
+from practical_agency.deferred_interest import validate_deferred_interest
 from practical_agency.manifest_model import MissionStatus
 
-SCHEMA = "mission-manifest@1"
+MISSION_ID_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
-TOP_LEVEL_KEYS = {
+TOP_LEVEL = {
     "schema",
     "mission_id",
     "revision",
@@ -21,210 +22,338 @@ TOP_LEVEL_KEYS = {
     "integrity",
 }
 
-AUTHORITY_KEYS = {
-    "operator_ref",
-    "instruction",
-    "amendments",
-    "permissions",
-    "protected_state",
-    "acceptable_costs",
-    "escalation_required_for",
-    "revoked",
-    "revocation_reason",
+OBJECT_KEYS: dict[str, set[str]] = {
+    "authority": {
+        "operator_ref",
+        "instruction",
+        "amendments",
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+        "revoked",
+        "revocation_reason",
+    },
+    "outcome": {
+        "desired_state",
+        "completion_proof",
+        "integrity_guards",
+        "scope_proof",
+        "stop_conditions",
+    },
+    "truth": {
+        "subject_refs",
+        "verified_facts",
+        "assumptions",
+        "contradictions",
+        "unknowns",
+    },
+    "state": {
+        "status",
+        "completed_actions",
+        "current_frontier",
+        "blockers",
+        "next_action",
+    },
+    "capabilities": {
+        "discovered_at",
+        "available",
+        "invoked",
+        "unavailable",
+        "degraded",
+    },
+    "continuity": {
+        "prior_checkpoint",
+        "durable_artifacts",
+        "decisions",
+        "external_handoffs",
+        "watch_commissions",
+    },
+    "integrity": {
+        "actor_may_self_accept",
+        "required_gates",
+        "unresolved_verdicts",
+        "completion_acceptor",
+    },
 }
 
-OUTCOME_KEYS = {
-    "desired_state",
-    "completion_proof",
-    "integrity_guards",
-    "scope_proof",
-    "stop_conditions",
+OPTIONAL_OBJECT_FIELDS: dict[str, set[str]] = {
+    "continuity": {
+        "deferred_interests",
+        "processed_event_ids",
+        "execution_receipts",
+    },
 }
 
-TRUTH_KEYS = {
-    "subject_refs",
-    "verified_facts",
-    "assumptions",
-    "contradictions",
-    "unknowns",
+LIST_FIELDS: dict[str, set[str]] = {
+    "authority": {
+        "amendments",
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+    },
+    "outcome": {
+        "completion_proof",
+        "integrity_guards",
+        "scope_proof",
+        "stop_conditions",
+    },
+    "truth": {
+        "subject_refs",
+        "verified_facts",
+        "assumptions",
+        "contradictions",
+        "unknowns",
+    },
+    "state": {"completed_actions", "current_frontier", "blockers"},
+    "capabilities": {"available", "invoked", "unavailable", "degraded"},
+    "continuity": {
+        "durable_artifacts",
+        "decisions",
+        "external_handoffs",
+        "watch_commissions",
+        "deferred_interests",
+        "processed_event_ids",
+        "execution_receipts",
+    },
+    "integrity": {"required_gates", "unresolved_verdicts"},
 }
 
-STATE_KEYS = {
-    "status",
-    "completed_actions",
-    "current_frontier",
-    "blockers",
-    "next_action",
-}
 
-CAPABILITIES_KEYS = {
-    "discovered_at",
-    "available",
-    "invoked",
-    "unavailable",
-    "degraded",
-}
-
-CONTINUITY_KEYS = {
-    "prior_checkpoint",
-    "durable_artifacts",
-    "decisions",
-    "external_handoffs",
-    "watch_commissions",
-}
-
-INTEGRITY_KEYS = {
-    "actor_may_self_accept",
-    "required_gates",
-    "unresolved_verdicts",
-    "completion_acceptor",
-}
-
-STATUS_VALUES = {status.value for status in MissionStatus}
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
-def _reject_unknown(errors: list[str], path: str, payload: Mapping[str, Any], allowed: set[str]) -> None:
-    unknown = sorted(set(payload) - allowed)
-    for key in unknown:
-        errors.append(f"UNKNOWN_KEY: {path}.{key}")
+def _unknown_keys(
+    errors: list[str], prefix: str, payload: Mapping[str, Any], allowed: set[str]
+) -> None:
+    for key in sorted(set(payload) - allowed):
+        path = f"{prefix}.{key}" if prefix else key
+        errors.append(f"UNKNOWN_FIELD: {path} is not allowed")
 
 
-def _require_object(errors: list[str], path: str, value: Any) -> Mapping[str, Any] | None:
-    if not isinstance(value, dict):
-        errors.append(f"INVALID_OBJECT: {path} must be an object")
-        return None
-    return value
+def _all_nonempty_strings(value: object) -> bool:
+    return isinstance(value, list) and all(_nonempty_string(item) for item in value)
 
 
-def _require_nonempty_str(errors: list[str], path: str, value: Any) -> None:
-    if not isinstance(value, str) or not value.strip():
-        errors.append(f"EMPTY_STRING: {path} must be a non-empty string")
+def _optional_string(value: object) -> bool:
+    return value is None or isinstance(value, str)
 
 
-def _require_list(errors: list[str], path: str, value: Any) -> None:
-    if not isinstance(value, list):
-        errors.append(f"INVALID_LIST: {path} must be a list")
+def _all_mappings(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, Mapping) for item in value)
 
 
-def validate_manifest_dict(payload: Mapping[str, Any] | Any) -> list[str]:
+def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
+    if not isinstance(payload, Mapping):
+        return ["RECORD_MUST_BE_OBJECT: root must be an object"]
+
     errors: list[str] = []
-    if not isinstance(payload, dict):
-        return ["INVALID_OBJECT: top-level payload must be an object"]
+    _unknown_keys(errors, "", payload, TOP_LEVEL)
+    for required in sorted(TOP_LEVEL - set(payload)):
+        errors.append(f"MISSING_FIELD: {required} is required")
 
-    _reject_unknown(errors, "manifest", payload, TOP_LEVEL_KEYS)
-    for key in TOP_LEVEL_KEYS:
-        if key not in payload:
-            errors.append(f"MISSING_KEY: manifest.{key}")
-
-    if payload.get("schema") != SCHEMA:
-        errors.append(f"INVALID_SCHEMA: expected {SCHEMA}")
-
+    if payload.get("schema") != "mission-manifest@1":
+        errors.append("INVALID_SCHEMA: schema must equal mission-manifest@1")
     mission_id = payload.get("mission_id")
-    _require_nonempty_str(errors, "manifest.mission_id", mission_id)
+    if not _nonempty_string(mission_id):
+        errors.append("MISSION_ID_REQUIRED: mission_id must be non-empty")
+    elif MISSION_ID_PATTERN.fullmatch(mission_id) is None:
+        errors.append(
+            "INVALID_MISSION_ID: mission_id must use storage-safe ASCII letters, digits, dot, underscore, or hyphen"
+        )
 
     revision = payload.get("revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         errors.append("INVALID_REVISION: revision must be a positive integer")
 
-    authority = _require_object(errors, "manifest.authority", payload.get("authority"))
-    if authority is not None:
-        _reject_unknown(errors, "authority", authority, AUTHORITY_KEYS)
-        _require_nonempty_str(errors, "authority.operator_ref", authority.get("operator_ref"))
-        _require_nonempty_str(errors, "authority.instruction", authority.get("instruction"))
-        for key in (
-            "amendments",
-            "permissions",
-            "protected_state",
-            "acceptable_costs",
-            "escalation_required_for",
-        ):
-            _require_list(errors, f"authority.{key}", authority.get(key))
-        if not isinstance(authority.get("revoked"), bool):
-            errors.append("INVALID_BOOL: authority.revoked must be a boolean")
+    governed: dict[str, Mapping[str, Any]] = {}
+    for name, allowed in OBJECT_KEYS.items():
+        value = payload.get(name)
+        if not isinstance(value, Mapping):
+            errors.append(f"INVALID_OBJECT: {name} must be an object")
+            continue
+        governed[name] = value
+        allowed_keys = allowed | OPTIONAL_OBJECT_FIELDS.get(name, set())
+        _unknown_keys(errors, name, value, allowed_keys)
+        for required in sorted(allowed - set(value)):
+            errors.append(f"MISSING_FIELD: {name}.{required} is required")
+        for field in LIST_FIELDS.get(name, set()):
+            if field in value and not isinstance(value[field], list):
+                errors.append(f"INVALID_LIST: {name}.{field} must be an array")
 
-    outcome = _require_object(errors, "manifest.outcome", payload.get("outcome"))
-    if outcome is not None:
-        _reject_unknown(errors, "outcome", outcome, OUTCOME_KEYS)
-        _require_nonempty_str(errors, "outcome.desired_state", outcome.get("desired_state"))
-        for key in (
-            "completion_proof",
-            "integrity_guards",
-            "scope_proof",
-            "stop_conditions",
-        ):
-            value = outcome.get(key)
-            _require_list(errors, f"outcome.{key}", value)
-            if isinstance(value, list) and len(value) < 1:
-                errors.append(f"EMPTY_PROOF: outcome.{key} must be non-empty")
+    authority = governed.get("authority", {})
+    outcome = governed.get("outcome", {})
+    truth = governed.get("truth", {})
+    state = governed.get("state", {})
+    continuity = governed.get("continuity", {})
+    integrity = governed.get("integrity", {})
 
-    truth = _require_object(errors, "manifest.truth", payload.get("truth"))
-    if truth is not None:
-        _reject_unknown(errors, "truth", truth, TRUTH_KEYS)
-        for key in TRUTH_KEYS:
-            _require_list(errors, f"truth.{key}", truth.get(key))
+    if not _nonempty_string(authority.get("operator_ref")):
+        errors.append("OPERATOR_REQUIRED: authority.operator_ref must be non-empty")
+    if not _nonempty_string(authority.get("instruction")):
+        errors.append("INSTRUCTION_REQUIRED: authority.instruction must be non-empty")
+    for field in (
+        "amendments",
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+    ):
+        if not _all_nonempty_strings(authority.get(field)):
+            errors.append(
+                f"INVALID_STRING_LIST: authority.{field} must contain only non-empty strings"
+            )
+    if not _optional_string(authority.get("revocation_reason")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: authority.revocation_reason must be null or a string"
+        )
+    if not isinstance(authority.get("revoked"), bool):
+        errors.append("INVALID_REVOCATION_FLAG: authority.revoked must be boolean")
+    if authority.get("revoked") is True and not _nonempty_string(
+        authority.get("revocation_reason")
+    ):
+        errors.append("REVOCATION_REASON_REQUIRED: revoked authority requires a reason")
 
-    state = _require_object(errors, "manifest.state", payload.get("state"))
-    status: str | None = None
-    if state is not None:
-        _reject_unknown(errors, "state", state, STATE_KEYS)
-        status_value = state.get("status")
-        if status_value not in STATUS_VALUES:
-            errors.append("INVALID_STATUS: state.status is outside the closed enum")
+    if not _nonempty_string(outcome.get("desired_state")):
+        errors.append("DESIRED_STATE_REQUIRED: outcome.desired_state must be non-empty")
+    for field in (
+        "completion_proof",
+        "integrity_guards",
+        "scope_proof",
+        "stop_conditions",
+    ):
+        value = outcome.get(field)
+        if not isinstance(value, list) or not value:
+            errors.append(f"EMPTY_PROOF_FIELD: outcome.{field} must be a non-empty array")
+        elif not _all_nonempty_strings(value):
+            errors.append(f"INVALID_PROOF_ITEM: outcome.{field} items must be non-empty strings")
+
+    subject_refs = truth.get("subject_refs")
+    if not isinstance(subject_refs, list) or not subject_refs:
+        errors.append("SUBJECT_REF_REQUIRED: truth.subject_refs must be non-empty")
+    elif not _all_nonempty_strings(subject_refs):
+        errors.append(
+            "INVALID_SUBJECT_REFS: truth.subject_refs must contain only non-empty strings"
+        )
+
+    verified_facts = truth.get("verified_facts")
+    if isinstance(verified_facts, list):
+        for index, fact in enumerate(verified_facts):
+            if not isinstance(fact, Mapping):
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}] must be an object"
+                )
+                continue
+            _unknown_keys(
+                errors,
+                f"truth.verified_facts[{index}]",
+                fact,
+                {"subject_ref", "value"},
+            )
+            if set(fact) != {"subject_ref", "value"}:
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}] must contain subject_ref and value"
+                )
+            elif not _nonempty_string(fact.get("subject_ref")):
+                errors.append(
+                    f"INVALID_VERIFIED_FACT: truth.verified_facts[{index}].subject_ref must be non-empty"
+                )
+
+    capabilities = governed.get("capabilities", {})
+    if not _optional_string(capabilities.get("discovered_at")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: capabilities.discovered_at must be null or a string"
+        )
+
+    if not _optional_string(continuity.get("prior_checkpoint")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: continuity.prior_checkpoint must be null or a string"
+        )
+    if not _all_nonempty_strings(continuity.get("durable_artifacts")):
+        errors.append(
+            "INVALID_STRING_LIST: continuity.durable_artifacts must contain only non-empty strings"
+        )
+    if not _all_nonempty_strings(continuity.get("processed_event_ids", [])):
+        errors.append(
+            "INVALID_STRING_LIST: continuity.processed_event_ids must contain only non-empty strings"
+        )
+    for field in (
+        "decisions",
+        "external_handoffs",
+        "watch_commissions",
+        "execution_receipts",
+    ):
+        if not _all_mappings(continuity.get(field, [])):
+            errors.append(
+                f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
+            )
+
+    deferred_interests = continuity.get("deferred_interests")
+    if deferred_interests is not None:
+        if not isinstance(deferred_interests, list):
+            errors.append(
+                "INVALID_OBJECT_LIST: continuity.deferred_interests must be an array"
+            )
         else:
-            status = str(status_value)
-        for key in ("completed_actions", "current_frontier", "blockers"):
-            _require_list(errors, f"state.{key}", state.get(key))
-        next_action = state.get("next_action")
-        if next_action is not None and not isinstance(next_action, str):
-            errors.append("INVALID_STRING: state.next_action must be a string or null")
+            manifest_mission_id = str(payload.get("mission_id") or "")
+            for index, item in enumerate(deferred_interests):
+                for error in validate_deferred_interest(
+                    item, mission_id=manifest_mission_id
+                ):
+                    errors.append(
+                        f"DEFERRED_INTEREST: continuity.deferred_interests[{index}]: {error}"
+                    )
 
-    capabilities = _require_object(errors, "manifest.capabilities", payload.get("capabilities"))
-    if capabilities is not None:
-        _reject_unknown(errors, "capabilities", capabilities, CAPABILITIES_KEYS)
-        for key in ("available", "invoked", "unavailable", "degraded"):
-            _require_list(errors, f"capabilities.{key}", capabilities.get(key))
-
-    continuity = _require_object(errors, "manifest.continuity", payload.get("continuity"))
-    if continuity is not None:
-        _reject_unknown(errors, "continuity", continuity, CONTINUITY_KEYS)
-        for key in (
-            "durable_artifacts",
-            "decisions",
-            "external_handoffs",
-            "watch_commissions",
-        ):
-            _require_list(errors, f"continuity.{key}", continuity.get(key))
-
-    integrity = _require_object(errors, "manifest.integrity", payload.get("integrity"))
-    if integrity is not None:
-        _reject_unknown(errors, "integrity", integrity, INTEGRITY_KEYS)
-        if integrity.get("actor_may_self_accept") is not False:
+    for field in ("required_gates", "unresolved_verdicts"):
+        if not _all_nonempty_strings(integrity.get(field)):
             errors.append(
-                "SELF_ACCEPTANCE_FORBIDDEN: integrity.actor_may_self_accept must be exactly false"
+                f"INVALID_STRING_LIST: integrity.{field} must contain only non-empty strings"
             )
-        _require_list(errors, "integrity.required_gates", integrity.get("required_gates"))
+    if not _optional_string(integrity.get("completion_acceptor")):
+        errors.append(
+            "INVALID_OPTIONAL_STRING: integrity.completion_acceptor must be null or a string"
+        )
+
+    raw_status = state.get("status")
+    status = raw_status if isinstance(raw_status, str) else None
+    allowed_status = {item.value for item in MissionStatus}
+    if status not in allowed_status:
+        errors.append(f"INVALID_STATUS: {raw_status!r} is not a mission status")
+
+    next_action = state.get("next_action")
+    if next_action is not None and not _nonempty_string(next_action):
+        errors.append("INVALID_NEXT_ACTION: state.next_action must be null or non-empty")
+
+    if integrity.get("actor_may_self_accept") is not False:
+        errors.append(
+            "SELF_ACCEPTANCE_FORBIDDEN: integrity.actor_may_self_accept must be false"
+        )
+
+    if status in {MissionStatus.VERIFYING.value, MissionStatus.COMPLETED.value}:
+        if not _nonempty_string(integrity.get("completion_acceptor")):
+            errors.append(
+                "COMPLETION_ACCEPTOR_REQUIRED: verification/completion requires an acceptor"
+            )
+
+    if status == MissionStatus.COMPLETED.value:
         unresolved = integrity.get("unresolved_verdicts")
-        _require_list(errors, "integrity.unresolved_verdicts", unresolved)
-        acceptor = integrity.get("completion_acceptor")
-        if status == MissionStatus.COMPLETED.value:
-            if not isinstance(acceptor, str) or not acceptor.strip():
-                errors.append(
-                    "COMPLETION_ACCEPTOR_REQUIRED: completed missions need a completion_acceptor"
-                )
-            if isinstance(unresolved, list) and unresolved:
-                errors.append(
-                    "UNRESOLVED_VERDICTS: completed missions cannot retain unresolved verdicts"
-                )
-
-    if authority is not None and authority.get("revoked") is True:
-        if status not in {MissionStatus.CANCELLED.value, MissionStatus.BLOCKED.value}:
+        if isinstance(unresolved, list) and unresolved:
             errors.append(
-                "REVOKED_STATE: revoked authority permits only cancelled or blocked state"
+                "UNRESOLVED_VERDICTS: completed missions cannot retain unresolved verdicts"
             )
+
+    if authority.get("revoked") is True and status not in {
+        MissionStatus.BLOCKED.value,
+        MissionStatus.CANCELLED.value,
+    }:
+        errors.append(
+            "REVOKED_STATE_INVALID: revoked authority permits only blocked or cancelled"
+        )
 
     if (
-        continuity is not None
-        and isinstance(revision, int)
+        isinstance(revision, int)
         and not isinstance(revision, bool)
         and revision > 1
         and status
@@ -233,10 +362,10 @@ def validate_manifest_dict(payload: Mapping[str, Any] | Any) -> list[str]:
             MissionStatus.VERIFYING.value,
             MissionStatus.COMPLETED.value,
         }
-        and continuity.get("prior_checkpoint") is None
+        and not _nonempty_string(continuity.get("prior_checkpoint"))
     ):
         errors.append(
-            "CHECKPOINT_REQUIRED: active/verifying/completed after revision 1 need prior_checkpoint"
+            "PRIOR_CHECKPOINT_REQUIRED: resumable active state requires a checkpoint reference"
         )
 
     return errors
