@@ -18,6 +18,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Export isolated hardening workspace
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: practical-agency-source-${{ github.sha }}
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
       - name: Fetch pinned commission-watch contract outside product tree
         run: |
           upstream="$RUNNER_TEMP/epistemic-skills"
@@ -27,6 +36,7 @@ jobs:
           git -C "$upstream" checkout --detach 6e26484a9cae7629b233734fe5121137ba9168a8
           test "$(git -C "$upstream" rev-parse HEAD)" = "6e26484a9cae7629b233734fe5121137ba9168a8"
           echo "PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT=$upstream/plugins/epistemic-skills/contracts/watch-commission" >> "$GITHUB_ENV"
+          echo "PRACTICAL_AGENCY_UPSTREAM_SKILLS_DIR=$upstream/plugins/epistemic-skills/skills" >> "$GITHUB_ENV"
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
