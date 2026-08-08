@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -137,7 +138,7 @@ def propose_defer(
     *,
     completion_proof_ids: Sequence[str] | None = None,
 ) -> MissionOsProposal:
-    copied = dict(interest)
+    copied = deepcopy(interest)
     errors = validate_deferred_interest(copied, mission_id=manifest.mission_id)
     if errors:
         raise ValueError(errors[0])
@@ -151,7 +152,7 @@ def propose_return_rebind(
     manifest: MissionManifest,
     invalidate: list[Mapping[str, Any]],
 ) -> MissionOsProposal:
-    invalidated = [dict(item) for item in invalidate]
+    invalidated = deepcopy(invalidate)
     return MissionOsProposal("return_rebind", {"invalidate": invalidated})
 
 

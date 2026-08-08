@@ -7,6 +7,7 @@ from practical_agency.mission_os import (
     propose_defer,
     propose_frontier_patch,
     propose_replan_slice,
+    propose_return_rebind,
 )
 from practical_agency.manifest_model import MissionManifest
 from tests.helpers import clone_payload
@@ -44,6 +45,33 @@ class MissionOsProposeTests(unittest.TestCase):
                 ["run metacognate next"],
                 forbidden_substrings=("metacognate",),
             )
+
+    def test_propose_defer_deep_copies_interest_subject_refs(self) -> None:
+        manifest = self.active()
+        interest = {
+            "schema": "deferred-interest@1",
+            "mission_id": "mission-001",
+            "summary": "side note",
+            "criticality": "low",
+            "why_not_now": "distraction",
+            "suggested_next": None,
+            "subject_refs": ["ref:a"],
+            "created_at_revision": 2,
+            "status": "open",
+        }
+        proposal = propose_defer(manifest, interest)
+        interest["subject_refs"].append("ref:mutated")
+        self.assertEqual(
+            proposal.payload["interest"]["subject_refs"],
+            ["ref:a"],
+        )
+
+    def test_propose_return_rebind_kind(self) -> None:
+        proposal = propose_return_rebind(
+            self.active(),
+            [{"kind": "subject", "ref": "x"}],
+        )
+        self.assertEqual(proposal.kind, "return_rebind")
 
     def test_defer_refuses_completion_proof_necessary_summary(self) -> None:
         manifest = self.active()
