@@ -38,6 +38,7 @@ class RepositoryContractTests(unittest.TestCase):
             "adapters/README.md",
             "docs/mission-manifest.md",
             "docs/release/RELEASE-0.1.0.md",
+            "docs/release/MISSION-OS-SLICE-CLAIM-CEILING.md",
             "examples/watch-commission-mission.json",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)

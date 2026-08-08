@@ -13,7 +13,7 @@ cannot replace a validated checkpoint.
 | `truth` | Revision-bound subjects, verified facts, assumptions, contradictions, unknowns |
 | `state` | Closed mission status, completed actions, frontier, blockers, next action |
 | `capabilities` | Discovery time and available, invoked, unavailable, degraded capabilities |
-| `continuity` | Prior checkpoint, artifacts, decisions, external handoffs, watch commissions |
+| `continuity` | Prior checkpoint, artifacts, decisions, external handoffs, watch commissions, deferred interests |
 | `integrity` | Self-acceptance prohibition, gates, unresolved verdicts, independent acceptor |
 
 The complete structural carrier is

@@ -132,15 +132,16 @@ def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
 
 def _frontier_apply_present(manifest: MissionManifest) -> bool:
     rev = manifest.revision
+    latest: int | None = None
     for item in manifest.continuity.get("decisions", []):
-        if (
-            isinstance(item, Mapping)
-            and item.get("kind") == "mission-os-apply"
-            and item.get("at_revision") == rev
-            and item.get("proposal_kind") in {"frontier_patch", "replan_slice"}
-        ):
-            return True
-    return False
+        if not isinstance(item, Mapping) or item.get("kind") != "mission-os-apply":
+            continue
+        if item.get("proposal_kind") not in {"frontier_patch", "replan_slice"}:
+            continue
+        at_revision = item.get("at_revision")
+        if isinstance(at_revision, int) and (latest is None or at_revision > latest):
+            latest = at_revision
+    return latest is not None and latest <= rev
 
 
 def _pending_remediation_reason(manifest: MissionManifest) -> str | None:
