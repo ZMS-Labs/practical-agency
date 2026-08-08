@@ -3,6 +3,10 @@
 This document describes the candidate boundary. It is not a claim that a tag,
 package registry release, live harness installation, or background service exists.
 
+Tagging `0.1.0` does **not** satisfy
+[RELEASE-1.0.0-CRITERIA.md](RELEASE-1.0.0-CRITERIA.md). See
+[VERSIONING.md](VERSIONING.md) for the claim-surface ladder.
+
 ## Proven by deterministic fixtures
 
 - strict mission-manifest validation and canonical round trips;

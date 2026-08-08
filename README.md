@@ -28,6 +28,14 @@ until each packaging surface is exercised against its exact installed revision;
 comparative benefit over an ordinary capable agent is also unestablished until a
 controlled evaluation exists.
 
+`1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
+authorized intent installable in a declared harness, advanced through at least
+one bounded adapter with an external durable receipt, resumable from
+checkpoints, and closable only by an independent acceptor. See
+[docs/release/VERSIONING.md](docs/release/VERSIONING.md) and
+[docs/release/RELEASE-1.0.0-CRITERIA.md](docs/release/RELEASE-1.0.0-CRITERIA.md).
+Tagging or accepting `0.1.0` does not satisfy those criteria.
+
 ## Conceptual stack
 
 | Layer | Owns |
