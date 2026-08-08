@@ -126,6 +126,14 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.ACTIVE.value,
         MissionStatus.BLOCKED.value,
     },
+    "record_watch_crossing": {
+        MissionStatus.DRAFT.value,
+        MissionStatus.ACTIVE.value,
+        MissionStatus.PAUSED.value,
+        MissionStatus.BLOCKED.value,
+        MissionStatus.VERIFYING.value,
+        MissionStatus.COMPLETED.value,
+    },
     "record_execution_receipt": {MissionStatus.ACTIVE.value},
     "amend_authority": {
         MissionStatus.DRAFT.value,
@@ -470,6 +478,54 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                     if state["current_frontier"]
                     else "resume mission"
                 )
+
+    elif event.kind == "record_watch_crossing":
+        _require_mission_steward(event)
+        if set(payload) != {"handoff"}:
+            raise TransitionError("WATCH_CROSSING_EVENT_INVALID")
+        handoff = payload.get("handoff")
+        required_handoff_fields = {
+            "kind",
+            "commission_id",
+            "event_ref",
+            "observed_at",
+            "condition",
+            "expected_output_contract",
+            "return_point",
+        }
+        if not isinstance(handoff, Mapping) or set(handoff) != required_handoff_fields:
+            raise TransitionError("WATCH_CROSSING_HANDOFF_INVALID")
+        if handoff.get("kind") != "watch-crossing":
+            raise TransitionError("WATCH_CROSSING_HANDOFF_INVALID")
+        for key in (
+            "commission_id",
+            "event_ref",
+            "observed_at",
+            "condition",
+            "expected_output_contract",
+        ):
+            if not isinstance(handoff.get(key), str) or not handoff.get(key).strip():
+                raise TransitionError(f"WATCH_CROSSING_{key.upper()}_REQUIRED")
+        if handoff.get("observed_at") != event.observed_at:
+            raise TransitionError("WATCH_CROSSING_OBSERVED_AT_MISMATCH")
+        return_point = handoff.get("return_point")
+        if (
+            not isinstance(return_point, Mapping)
+            or set(return_point) != {"mission_id", "mission_revision", "status"}
+            or return_point.get("mission_id") != manifest.mission_id
+            or return_point.get("mission_revision") != manifest.revision
+            or return_point.get("status") != current
+        ):
+            raise TransitionError("WATCH_CROSSING_RETURN_POINT_MISMATCH")
+        if any(
+            isinstance(item, Mapping)
+            and item.get("kind") == "watch-crossing"
+            and item.get("commission_id") == handoff.get("commission_id")
+            and item.get("event_ref") == handoff.get("event_ref")
+            for item in continuity.get("external_handoffs", [])
+        ):
+            raise TransitionError("WATCH_CROSSING_REPLAY")
+        continuity["external_handoffs"].append(deepcopy(dict(handoff)))
 
     elif event.kind == "record_execution_receipt":
         _require_mission_steward(event)
