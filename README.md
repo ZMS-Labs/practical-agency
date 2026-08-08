@@ -17,11 +17,13 @@ Version 0.1 is a deterministic, standard-library mission kernel plus a portable
 Agent Skill. It is **not a daemon**, hosted service, scheduler, autonomous
 background actor, or source of independent machine goals.
 
-The repository proves deterministic mission custody, bounded authority, atomic
-checkpoints, dynamic capability discovery, request/receipt binding, exact return
-points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
-independent completion, and pinned commission-contract interoperability in
-isolated tests.
+The repository exercises deterministic mission custody, bounded authority, atomic
+checkpoints, forward-compatible dynamic capability discovery, revision-bound
+events and proposals, exact return points, crash-visible receipt journaling,
+fail-closed live-state reconciliation, evidence-bearing independent completion,
+and pinned upstream interoperability in isolated tests. These tests verify
+structured provenance and recorded clearance; they do not prove unrestricted
+natural-language entailment.
 
 There is **no general-purpose shell execution adapter**. A bounded filesystem artifact adapter can write allowlisted text artifacts with on-disk
 receipts (`practical_agency.filesystem_artifact`). That is not v1 readiness.
@@ -100,18 +102,20 @@ python .github/scripts/check_harness_surfaces.py
 python .github/scripts/check_public_content.py
 ```
 
-The permanent CI gate additionally checks out the commission-watch contract at
-immutable `epistemic-skills` revision
-`6e26484a9cae7629b233734fe5121137ba9168a8` and requires its actual semantic
-verifier and example corpus during the test run.
+The permanent CI gate additionally checks out `epistemic-skills` at immutable
+revision `6e26484a9cae7629b233734fe5121137ba9168a8`. It requires the actual
+commission-watch semantic verifier and example corpus, and dynamically discovers
+every pinned skill descriptor without maintaining a copied member inventory.
 
 ## Commission-watch boundary
 
 Practical Agency does not become the observer. The upstream commission-watch
 discipline defines and proves the observation claim; an external mechanism does
 the actual between-session watching. Practical Agency may retain a validated
-commission, coordinate an authorized adapter, preserve receipts, and reopen a
-mission when a receipted crossing arrives.
+commission, coordinate an authorized adapter, preserve receipts, and record a
+receipted crossing handoff. A crossing cannot rewrite the frontier or reopen a
+completed mission; only a revision-bound replan proposed against the crossing and
+applied by the mission steward may do that.
 
 Pinned interoperability tests establish that:
 
@@ -125,8 +129,9 @@ Pinned interoperability tests establish that:
 That proves carrier/verifier compatibility at one immutable revision. It does
 **not** authenticate receipt references, commission a production observer, admit
 a production adapter, or create an automatic `watch` → `manifest` route.
-Post-crossing `triage` and `decision-ledger` classification remains separate from
-mission custody.
+Post-crossing method selection remains external to Practical Agency. The handoff
+contains a bounded condition, expected output contract, and return point rather
+than a named skill route.
 
 ## Repository map
 

@@ -14,7 +14,7 @@ The governing invariants are:
 2. The steward is the sole writer of mission frontier state. Watch crossings and capability selection cannot mutate that state directly.
 3. No dispatch or capability interruption may consume a frontier until a matching mission-OS proposal has been applied.
 4. Authorization is rechecked at the world-effect boundary. A caller-created decision is not an authorization token.
-5. Events, proposals, decisions, and receipts are bound to mission identity, revision, and canonical payload.
+5. Events are identity/revision-bound; proposals, dispatch decisions, and receipts are additionally bound to canonical payloads.
 6. Return points identify a real frontier entry; invalid indexes fail closed.
 7. New frontier aims require resolvable basis records. Deferral of potentially critical work fails closed when clearance is ambiguous.
 8. World effects are journaled before execution and finalized atomically afterward. Crash windows remain visible rather than being represented as success.
@@ -48,7 +48,7 @@ The first slice may still replace the full frontier, but it does so explicitly u
 
 ### Applied-frontier record
 
-Applying a frontier proposal records a decision containing proposal identity, base revision, resulting revision, canonical frontier hash, and return-point contract. Coordinator gates verify that record against the live frontier. Both execution and capability interruption require it; the requirement is not caller-configurable.
+Applying a frontier proposal records proposal identity, base and resulting revision, canonical payload hash, canonical frontier hash, basis references, and replacement range. Coordinator gates verify the recorded frontier hash against the live frontier; exact return points are separately bound to mission, revision, index, and label. Both execution and capability interruption require the apply record, and the requirement is not caller-configurable.
 
 ### Dispatch authority
 
@@ -65,7 +65,7 @@ Adapters expose a stable `adapter_ref`. An adapter can dispatch only requests wh
 
 ### Watch crossings
 
-The commission watcher emits a crossing observation and external handoff containing the unanswered condition, expected output contract, and return point. It does not alter the frontier, mission status, next action, or select named epistemic skills. A later mission-OS proposal may cite the recorded crossing as a basis and the steward may apply it.
+The commission watcher records a crossing observation and external handoff containing the unanswered condition, expected output contract, and return point. Recording the observation advances the manifest revision, but it does not alter the frontier, mission status, next action, or select named epistemic skills. A later mission-OS proposal may cite the recorded crossing as a basis and the steward may apply it.
 
 ### Return points
 

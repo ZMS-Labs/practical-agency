@@ -21,19 +21,21 @@ from practical_agency.coordinator import (
     dispatch_once,
 )
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.state_machine import MissionEvent, TransitionError, apply_event
+from practical_agency.state_machine import TransitionError, apply_event_data
 from practical_agency.validation import validate_manifest_dict
 from practical_agency.watch_commission import (
     CommissionIntegrationError,
-    accept_external_commission,
     disable_commissions_for_revocation,
     handle_crossing_event,
     prepare_disabled,
 )
-from tests.helpers import clone_payload
+from tests.helpers import clone_payload, mission_os_event
 
 
 class ExecutionAdapter:
+    adapter_ref = "fixture://adapter"
+    capability_ids = ("fixture-writer",)
+
     def __init__(self, result: Mapping[str, Any]) -> None:
         self.result = dict(result)
         self.calls: list[dict[str, Any]] = []
@@ -100,7 +102,17 @@ def active_manifest() -> MissionManifest:
     payload["revision"] = 2
     payload["state"]["status"] = "active"
     payload["continuity"]["prior_checkpoint"] = "checkpoint:1"
-    return MissionManifest.from_dict(payload)
+    manifest = MissionManifest.from_dict(payload)
+    return apply_event_data(
+        manifest,
+        "apply_mission_os",
+        "mission-steward",
+        mission_os_event(
+            manifest,
+            "frontier_patch",
+            {"labels": list(manifest.state["current_frontier"])},
+        ),
+    )
 
 
 def capability(*permissions: str) -> CapabilityDescriptor:
@@ -369,12 +381,23 @@ class IntegrityHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(CoordinationError, "INVALID_EXECUTION_RECEIPT"):
             dispatch_once(active_manifest(), decision, adapter)
 
-        assert decision.request is not None
+        second_manifest = active_manifest()
+        second_decision = coordinate_once(
+            second_manifest,
+            execution_request={
+                "capability_id": "fixture-writer",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write one artifact",
+            },
+            checkpoint_store=object(),
+        )
         receipt = {
             "schema": "execution-receipt@1",
             "request_id": "wrong-request",
             "mission_id": "mission-001",
-            "mission_revision": 2,
+            "mission_revision": second_manifest.revision,
             "adapter_ref": "fixture://adapter",
             "status": "completed",
             "artifact_refs": ["artifact:1"],
@@ -383,7 +406,7 @@ class IntegrityHardeningTests(unittest.TestCase):
             "coverage_limits": [],
         }
         with self.assertRaisesRegex(CoordinationError, "EXECUTION_RECEIPT_REQUEST_MISMATCH"):
-            dispatch_once(active_manifest(), decision, ExecutionAdapter(receipt))
+            dispatch_once(second_manifest, second_decision, ExecutionAdapter(receipt))
 
     def test_capability_result_rejects_hidden_fields_and_nonstring_refs(self) -> None:
         decision = coordinate_once(
@@ -398,11 +421,20 @@ class IntegrityHardeningTests(unittest.TestCase):
                 decision,
                 capability_result(decision, artifact_refs=[{}]),
             )
+        second_manifest = active_manifest()
+        second_decision = coordinate_once(
+            second_manifest,
+            unresolved_condition="Need bounded evidence",
+            selected_capability=capability(),
+            checkpoint_store=object(),
+        )
         with self.assertRaisesRegex(CoordinationError, "INVALID_CAPABILITY_RESULT"):
             apply_capability_result(
-                active_manifest(),
-                decision,
-                capability_result(decision, hidden_instruction="take over mission"),
+                second_manifest,
+                second_decision,
+                capability_result(
+                    second_decision, hidden_instruction="take over mission"
+                ),
             )
 
     def test_verification_requires_complete_proof_and_required_gates(self) -> None:
@@ -414,15 +446,15 @@ class IntegrityHardeningTests(unittest.TestCase):
         payload["integrity"]["required_gates"] = ["artifact:gate-pass"]
         active = MissionManifest.from_dict(payload)
         with self.assertRaisesRegex(TransitionError, "PROOF_BUNDLE_NOT_READY"):
-            apply_event(active, MissionEvent("begin_verification", "mission-steward", {}))
+            apply_event_data(active, "begin_verification", "mission-steward", {})
 
         payload["continuity"]["durable_artifacts"] = [
             "artifact:validator-pass",
             "artifact:gate-pass",
         ]
         ready = MissionManifest.from_dict(payload)
-        verifying = apply_event(
-            ready, MissionEvent("begin_verification", "mission-steward", {})
+        verifying = apply_event_data(
+            ready, "begin_verification", "mission-steward", {}
         )
         self.assertEqual(verifying.state["status"], "verifying")
 
@@ -434,50 +466,38 @@ class IntegrityHardeningTests(unittest.TestCase):
         payload["continuity"]["durable_artifacts"] = ["artifact:validator-pass"]
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         active = MissionManifest.from_dict(payload)
-        acted = apply_event(
+        acted = apply_event_data(
             active,
-            MissionEvent(
-                "record_action",
-                "worker:test",
-                {"action_ref": "artifact:material-work"},
-            ),
+            "record_action", "worker:test", {"action_ref": "artifact:material-work"},
         )
-        verifying = apply_event(
-            acted, MissionEvent("begin_verification", "mission-steward", {})
+        verifying = apply_event_data(
+            acted, "begin_verification", "mission-steward", {}
         )
 
         with self.assertRaisesRegex(TransitionError, "ACCEPTANCE_EVIDENCE_REQUIRED"):
-            apply_event(
+            apply_event_data(
                 verifying,
-                MissionEvent("accept", "reviewer:test", {"verdict": "PASS"}),
+                "accept", "reviewer:test", {"verdict": "PASS"},
             )
         with self.assertRaisesRegex(TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"):
-            apply_event(
+            apply_event_data(
                 verifying,
-                MissionEvent(
-                    "reject",
-                    "worker:test",
-                    {
+                "reject", "worker:test", {
                         "verdict": "FAIL",
                         "reason": "wrong",
                         "evidence_refs": ["artifact:review"],
                         "coverage_limits": [],
                     },
-                ),
             )
 
-        rejected = apply_event(
+        rejected = apply_event_data(
             verifying,
-            MissionEvent(
-                "reject",
-                "reviewer:test",
-                {
+            "reject", "reviewer:test", {
                     "verdict": "FAIL",
                     "reason": "wrong",
                     "evidence_refs": ["artifact:review"],
                     "coverage_limits": ["fixture only"],
                 },
-            ),
         )
         decision = rejected.continuity["decisions"][-1]
         self.assertEqual(decision["evidence_refs"], ["artifact:review"])
@@ -507,24 +527,20 @@ class IntegrityHardeningTests(unittest.TestCase):
         self.assertTrue(reopened.integrity["unresolved_verdicts"])
 
         with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
-            apply_event(
+            apply_event_data(
                 reopened,
-                MissionEvent("begin_verification", "mission-steward", {}),
+                "begin_verification", "mission-steward", {},
             )
 
-        repaired = apply_event(
+        repaired = apply_event_data(
             reopened,
-            MissionEvent(
-                "record_observation",
-                "observer:test",
-                {
+            "record_observation", "observer:test", {
                     "artifact_ref": "artifact:validator-pass",
                     "fact": {
                         "subject_ref": "artifact:canonical",
                         "value": "hash-b",
                     },
                 },
-            ),
         )
         self.assertEqual(repaired.state["status"], "active")
         self.assertEqual(repaired.integrity["unresolved_verdicts"], [])

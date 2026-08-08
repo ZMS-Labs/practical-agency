@@ -78,7 +78,11 @@ OBJECT_KEYS: dict[str, set[str]] = {
 }
 
 OPTIONAL_OBJECT_FIELDS: dict[str, set[str]] = {
-    "continuity": {"deferred_interests"},
+    "continuity": {
+        "deferred_interests",
+        "processed_event_ids",
+        "execution_receipts",
+    },
 }
 
 LIST_FIELDS: dict[str, set[str]] = {
@@ -110,6 +114,8 @@ LIST_FIELDS: dict[str, set[str]] = {
         "external_handoffs",
         "watch_commissions",
         "deferred_interests",
+        "processed_event_ids",
+        "execution_receipts",
     },
     "integrity": {"required_gates", "unresolved_verdicts"},
 }
@@ -269,8 +275,17 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
         errors.append(
             "INVALID_STRING_LIST: continuity.durable_artifacts must contain only non-empty strings"
         )
-    for field in ("decisions", "external_handoffs", "watch_commissions"):
-        if not _all_mappings(continuity.get(field)):
+    if not _all_nonempty_strings(continuity.get("processed_event_ids", [])):
+        errors.append(
+            "INVALID_STRING_LIST: continuity.processed_event_ids must contain only non-empty strings"
+        )
+    for field in (
+        "decisions",
+        "external_handoffs",
+        "watch_commissions",
+        "execution_receipts",
+    ):
+        if not _all_mappings(continuity.get(field, [])):
             errors.append(
                 f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
             )
@@ -278,8 +293,10 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
     deferred_interests = continuity.get("deferred_interests")
     if deferred_interests is not None:
         if not isinstance(deferred_interests, list):
-            pass
-        elif isinstance(deferred_interests, list):
+            errors.append(
+                "INVALID_OBJECT_LIST: continuity.deferred_interests must be an array"
+            )
+        else:
             manifest_mission_id = str(payload.get("mission_id") or "")
             for index, item in enumerate(deferred_interests):
                 for error in validate_deferred_interest(

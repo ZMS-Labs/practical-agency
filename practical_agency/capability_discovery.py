@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Protocol
@@ -29,6 +29,7 @@ class CapabilityDescriptor:
     independence: str
     availability: str
     degradation_reason: str | None
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class CapabilityProvider(Protocol):
@@ -82,15 +83,22 @@ def _parse_frontmatter(text: str) -> dict[str, object]:
                 raise ValueError("MALFORMED_METADATA")
             key, value = line.split(":", 1)
             key = key.strip()
-            if key not in _SUPPORTED_METADATA:
-                raise ValueError(f"UNSUPPORTED_METADATA_KEY:{key}")
             if value.strip() in {"|", ">"}:
                 raise ValueError("UNSUPPORTED_MULTILINE_SCALAR")
-            metadata[key] = (
-                _list_scalar(value)
-                if key == "authority_required"
-                else _unquote(value)
-            )
+            if key == "authority_required":
+                # Authority-bearing metadata is part of this provider's contract and
+                # remains fail-closed. Additive metadata owned by another package is
+                # an extension namespace: preserve it without making discovery drift.
+                metadata[key] = _list_scalar(value)
+            elif key in _SUPPORTED_METADATA:
+                metadata[key] = _unquote(value)
+            else:
+                raw_value = value.strip()
+                metadata[key] = (
+                    _list_scalar(value)
+                    if raw_value.startswith("[") and raw_value.endswith("]")
+                    else _unquote(value)
+                )
             continue
         in_metadata = False
         if ":" not in raw:
@@ -192,6 +200,7 @@ class FileSystemSkillProvider:
                     independence=str(metadata.get("independence") or "either"),
                     availability=availability,
                     degradation_reason=degradation,
+                    metadata=dict(metadata),
                 )
             )
         return found

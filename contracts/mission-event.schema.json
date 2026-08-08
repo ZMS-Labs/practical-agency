@@ -44,6 +44,7 @@
         "cancel",
         "record_action",
         "record_observation",
+        "record_execution_receipt",
         "amend_authority",
         "apply_mission_os"
       ]

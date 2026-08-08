@@ -11,7 +11,8 @@ from practical_agency.coordinator import (
     dispatch_once,
 )
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.state_machine import MissionEvent, TransitionError, apply_event
+from practical_agency.mission_os import frontier_sha256
+from practical_agency.state_machine import TransitionError, apply_event_data
 from tests.helpers import clone_payload
 
 
@@ -29,6 +30,17 @@ def remediation_manifest(*, next_action: str | None = "repair live state for art
     ]
     payload["integrity"]["completion_acceptor"] = "reviewer:test"
     payload["continuity"]["durable_artifacts"] = ["artifact:validator-pass"]
+    payload["continuity"]["decisions"].append(
+        {
+            "kind": "mission-os-apply",
+            "proposal_kind": "frontier_patch",
+            "proposal_id": "proposal-before-remediation",
+            "base_revision": 1,
+            "payload_sha256": "a" * 64,
+            "at_revision": 2,
+            "frontier_sha256": frontier_sha256(payload["state"]["current_frontier"]),
+        }
+    )
     return MissionManifest.from_dict(payload)
 
 
@@ -158,19 +170,17 @@ class BlockerRemediationTests(unittest.TestCase):
                 label="forged",
             ),
         )
-        with self.assertRaisesRegex(CoordinationError, "EXACT_REMEDIATION_ACTION_REQUIRED"):
+        with self.assertRaisesRegex(CoordinationError, "DECISION_NOT_ISSUED"):
             dispatch_once(manifest, forged, adapter)
         self.assertEqual(adapter.calls, 0)
 
     def test_lifecycle_transition_cannot_bypass_pending_remediation(self) -> None:
         with self.assertRaisesRegex(TransitionError, "UNRESOLVED_BLOCKERS"):
-            apply_event(
+            apply_event_data(
                 remediation_manifest(),
-                MissionEvent(
-                    kind="begin_verification",
-                    actor_ref="mission-steward",
-                    data={},
-                ),
+                "begin_verification",
+                "mission-steward",
+                {},
             )
 
 

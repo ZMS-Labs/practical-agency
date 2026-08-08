@@ -3,11 +3,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from uuid import uuid4
 from typing import Any, Mapping
 
 from practical_agency.deferred_interest import validate_deferred_interest
 from practical_agency.manifest_model import MissionManifest, MissionStatus
-from practical_agency.mission_os import _defer_critical_path, _validate_labels
+from practical_agency.mission_os import (
+    _defer_critical_path,
+    _validate_labels,
+    decode_mission_os_proposal,
+    frontier_sha256,
+    validate_basis_refs,
+)
 
 
 class TransitionError(RuntimeError):
@@ -19,9 +27,71 @@ MISSION_STEWARD_REF = "mission-steward"
 
 @dataclass(frozen=True, slots=True)
 class MissionEvent:
+    schema: str
+    event_id: str
+    mission_id: str
+    expected_revision: int
     kind: str
     actor_ref: str
     data: Mapping[str, Any] = field(default_factory=dict)
+    observed_at: str = ""
+
+    @classmethod
+    def for_manifest(
+        cls,
+        manifest: MissionManifest,
+        kind: str,
+        actor_ref: str,
+        data: Mapping[str, Any] | None = None,
+        *,
+        event_id: str | None = None,
+        observed_at: str | None = None,
+    ) -> "MissionEvent":
+        return cls(
+            schema="mission-event@1",
+            event_id=event_id or f"event-{uuid4().hex}",
+            mission_id=manifest.mission_id,
+            expected_revision=manifest.revision,
+            kind=kind,
+            actor_ref=actor_ref,
+            data=deepcopy(dict(data or {})),
+            observed_at=observed_at or datetime.now(timezone.utc).isoformat(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "event_id": self.event_id,
+            "mission_id": self.mission_id,
+            "expected_revision": self.expected_revision,
+            "kind": self.kind,
+            "actor_ref": self.actor_ref,
+            "data": deepcopy(dict(self.data)),
+            "observed_at": self.observed_at,
+        }
+
+
+def apply_event_data(
+    manifest: MissionManifest,
+    kind: str,
+    actor_ref: str,
+    data: Mapping[str, Any] | None = None,
+    *,
+    event_id: str | None = None,
+    observed_at: str | None = None,
+) -> MissionManifest:
+    """Bind and synchronously apply one local event to the live revision."""
+    return apply_event(
+        manifest,
+        MissionEvent.for_manifest(
+            manifest,
+            kind,
+            actor_ref,
+            data,
+            event_id=event_id,
+            observed_at=observed_at,
+        ),
+    )
 
 
 _ALLOWED_FROM: dict[str, set[str]] = {
@@ -56,13 +126,17 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.ACTIVE.value,
         MissionStatus.BLOCKED.value,
     },
+    "record_execution_receipt": {MissionStatus.ACTIVE.value},
     "amend_authority": {
         MissionStatus.DRAFT.value,
         MissionStatus.ACTIVE.value,
         MissionStatus.PAUSED.value,
         MissionStatus.BLOCKED.value,
     },
-    "apply_mission_os": {MissionStatus.ACTIVE.value},
+    "apply_mission_os": {
+        MissionStatus.ACTIVE.value,
+        MissionStatus.COMPLETED.value,
+    },
 }
 
 
@@ -148,7 +222,36 @@ def _reconciliation_subject(marker: object) -> str | None:
     return parts[2] if len(parts) == 3 and parts[2] else None
 
 
+def _validate_event_envelope(
+    manifest: MissionManifest, event: MissionEvent
+) -> None:
+    if event.schema != "mission-event@1":
+        raise TransitionError("EVENT_SCHEMA_MISMATCH")
+    if not isinstance(event.event_id, str) or not event.event_id.strip():
+        raise TransitionError("EVENT_ID_REQUIRED")
+    if event.mission_id != manifest.mission_id:
+        raise TransitionError("EVENT_MISSION_MISMATCH")
+    if (
+        isinstance(event.expected_revision, bool)
+        or not isinstance(event.expected_revision, int)
+        or event.expected_revision != manifest.revision
+    ):
+        raise TransitionError("EVENT_REVISION_MISMATCH")
+    if not isinstance(event.actor_ref, str) or not event.actor_ref.strip():
+        raise TransitionError("EVENT_ACTOR_REQUIRED")
+    if not isinstance(event.observed_at, str) or not event.observed_at.strip():
+        raise TransitionError("EVENT_OBSERVED_AT_REQUIRED")
+    if not isinstance(event.data, Mapping):
+        raise TransitionError("EVENT_DATA_MUST_BE_OBJECT")
+    processed = manifest.continuity.get("processed_event_ids", [])
+    if not isinstance(processed, list):
+        raise TransitionError("PROCESSED_EVENT_IDS_INVALID")
+    if event.event_id in processed:
+        raise TransitionError("EVENT_REPLAY")
+
+
 def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManifest:
+    _validate_event_envelope(manifest, event)
     if event.kind not in _ALLOWED_FROM:
         raise TransitionError(f"UNKNOWN_EVENT:{event.kind}")
 
@@ -164,6 +267,8 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
     state = data["state"]
     authority = data["authority"]
     continuity = data["continuity"]
+    continuity.setdefault("processed_event_ids", [])
+    continuity.setdefault("execution_receipts", [])
     integrity = data["integrity"]
 
     if event.kind == "approve":
@@ -366,6 +471,87 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                     else "resume mission"
                 )
 
+    elif event.kind == "record_execution_receipt":
+        _require_mission_steward(event)
+        if set(payload) != {"receipt", "request"}:
+            raise TransitionError("EXECUTION_RECEIPT_EVENT_INVALID")
+        receipt = payload.get("receipt")
+        request = payload.get("request")
+        required_receipt_fields = {
+            "schema",
+            "request_id",
+            "mission_id",
+            "mission_revision",
+            "adapter_ref",
+            "status",
+            "artifact_refs",
+            "observed_effects",
+            "external_receipt_ref",
+            "coverage_limits",
+        }
+        if not isinstance(receipt, Mapping) or set(receipt) != required_receipt_fields:
+            raise TransitionError("EXECUTION_RECEIPT_INVALID")
+        if not isinstance(request, Mapping):
+            raise TransitionError("EXECUTION_RECEIPT_REQUEST_REQUIRED")
+        required_request_fields = {
+            "schema",
+            "request_id",
+            "mission_id",
+            "mission_revision",
+            "capability_id",
+            "requested_permissions",
+            "requested_effects",
+            "estimated_costs",
+            "action",
+        }
+        if set(request) != required_request_fields or request.get("schema") != "execution-request@1":
+            raise TransitionError("EXECUTION_RECEIPT_REQUEST_INVALID")
+        if receipt.get("schema") != "execution-receipt@1":
+            raise TransitionError("EXECUTION_RECEIPT_SCHEMA")
+        if (
+            receipt.get("request_id") != request.get("request_id")
+            or receipt.get("mission_id") != request.get("mission_id")
+            or receipt.get("mission_revision") != request.get("mission_revision")
+        ):
+            raise TransitionError("EXECUTION_RECEIPT_REQUEST_MISMATCH")
+        if receipt.get("mission_id") != manifest.mission_id:
+            raise TransitionError("EXECUTION_RECEIPT_MISSION_MISMATCH")
+        if receipt.get("mission_revision") != manifest.revision:
+            raise TransitionError("EXECUTION_RECEIPT_REVISION_MISMATCH")
+        for key in ("request_id", "adapter_ref"):
+            if not isinstance(receipt.get(key), str) or not receipt.get(key).strip():
+                raise TransitionError(f"EXECUTION_RECEIPT_{key.upper()}_REQUIRED")
+        if receipt.get("status") not in {"completed", "declined", "blocked", "failed"}:
+            raise TransitionError("EXECUTION_RECEIPT_STATUS")
+        artifact_refs = receipt.get("artifact_refs")
+        coverage_limits = receipt.get("coverage_limits")
+        if (
+            not isinstance(artifact_refs, list)
+            or any(not isinstance(item, str) or not item.strip() for item in artifact_refs)
+            or not isinstance(coverage_limits, list)
+            or any(not isinstance(item, str) or not item.strip() for item in coverage_limits)
+            or not isinstance(receipt.get("observed_effects"), list)
+        ):
+            raise TransitionError("EXECUTION_RECEIPT_INVALID")
+        external_ref = receipt.get("external_receipt_ref")
+        if receipt.get("status") == "completed" and (
+            not isinstance(external_ref, str) or not external_ref.strip()
+        ):
+            raise TransitionError("EXECUTION_RECEIPT_EXTERNAL_REF_REQUIRED")
+        existing_ids = {
+            item.get("request_id")
+            for item in continuity.get("execution_receipts", [])
+            if isinstance(item, Mapping)
+        }
+        if receipt.get("request_id") in existing_ids:
+            raise TransitionError("EXECUTION_RECEIPT_REPLAY")
+        stored_receipt = deepcopy(dict(receipt))
+        stored_receipt["request"] = deepcopy(dict(request))
+        stored_receipt["recorded_at_revision"] = manifest.revision + 1
+        continuity["execution_receipts"].append(stored_receipt)
+        for artifact_ref in artifact_refs:
+            _append_unique(continuity["durable_artifacts"], artifact_ref)
+
     elif event.kind == "amend_authority":
         _operator_only(manifest, event)
         amendment = _required_string(payload, "amendment", "AMENDMENT_REQUIRED")
@@ -385,9 +571,14 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 _append_unique(authority[field], item)
 
     elif event.kind == "apply_mission_os":
-        proposal_kind = payload.get("proposal_kind")
-        if not isinstance(proposal_kind, str) or not proposal_kind.strip():
-            raise TransitionError("MISSION_OS_PROPOSAL_KIND_REQUIRED")
+        if set(payload) != {"proposal"}:
+            raise TransitionError("MISSION_OS_BOUND_PROPOSAL_REQUIRED")
+        try:
+            proposal_kind, content, proposal_meta = decode_mission_os_proposal(
+                manifest, payload.get("proposal")
+            )
+        except ValueError as exc:
+            raise TransitionError(str(exc)) from exc
         new_revision = manifest.revision + 1
         continuity.setdefault("deferred_interests", [])
         decision_extra: dict[str, Any] = {}
@@ -395,54 +586,103 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         if proposal_kind in ("frontier_patch", "replan_slice"):
             _require_mission_steward(event)
             labels = _string_list(
-                payload, "labels", "FRONTIER_LABELS_REQUIRED", non_empty=True
+                content, "labels", "FRONTIER_LABELS_REQUIRED", non_empty=True
             )
             try:
                 _validate_labels(labels)
+                basis_refs = validate_basis_refs(
+                    manifest, content.get("basis_refs")
+                )
             except ValueError as exc:
                 raise TransitionError(str(exc)) from exc
-            state["current_frontier"] = labels
-            state["next_action"] = labels[0] if labels else None
+            replace_range = content.get("replace_range")
+            if (
+                not isinstance(replace_range, list)
+                or len(replace_range) != 2
+                or any(isinstance(item, bool) or not isinstance(item, int) for item in replace_range)
+            ):
+                raise TransitionError("FRONTIER_REPLACE_RANGE_INVALID")
+            start_index, end_index = replace_range
+            current_frontier = state.get("current_frontier")
+            if (
+                not isinstance(current_frontier, list)
+                or start_index < 0
+                or end_index < start_index
+                or end_index > len(current_frontier)
+            ):
+                raise TransitionError("FRONTIER_REPLACE_RANGE_INVALID")
+            contradiction_refs: list[str] = []
             if proposal_kind == "replan_slice":
                 contradiction_refs = _string_list(
-                    payload,
+                    content,
                     "contradiction_refs",
                     "REPLAN_CONTRADICTION_REQUIRED",
                     non_empty=True,
                 )
-                for ref in contradiction_refs:
-                    _append_unique(data["truth"]["contradictions"], ref)
+                try:
+                    validate_basis_refs(manifest, contradiction_refs)
+                except ValueError as exc:
+                    raise TransitionError(str(exc)) from exc
+            if current == MissionStatus.COMPLETED.value:
+                crossing_refs = {
+                    item.get("event_ref")
+                    for item in continuity.get("external_handoffs", [])
+                    if isinstance(item, Mapping)
+                    and item.get("kind") == "watch-crossing"
+                }
+                if (
+                    proposal_kind != "replan_slice"
+                    or not contradiction_refs
+                    or not set(contradiction_refs).issubset(crossing_refs)
+                ):
+                    raise TransitionError("COMPLETED_REPLAN_REQUIRES_WATCH_CROSSING")
+                state["status"] = MissionStatus.ACTIVE.value
+            next_frontier = list(current_frontier)
+            next_frontier[start_index:end_index] = labels
+            state["current_frontier"] = next_frontier
+            state["next_action"] = next_frontier[0] if next_frontier else None
+            decision_extra.update(
+                {
+                    "basis_refs": basis_refs,
+                    "replace_range": [start_index, end_index],
+                    "frontier_sha256": frontier_sha256(next_frontier),
+                }
+            )
+            if contradiction_refs:
                 decision_extra["contradiction_refs"] = contradiction_refs
 
         elif proposal_kind == "defer":
             _require_mission_steward(event)
-            interest = payload.get("interest")
+            interest = content.get("interest")
             if not isinstance(interest, Mapping):
                 raise TransitionError("DEFERRED_INTEREST_REQUIRED")
             copied = deepcopy(dict(interest))
-            errors = validate_deferred_interest(
-                copied, mission_id=manifest.mission_id
-            )
-            if errors:
-                raise TransitionError(errors[0])
+            copied["created_at_revision"] = new_revision
             try:
                 _defer_critical_path(
                     manifest, copied, completion_proof_ids=None
                 )
             except ValueError as exc:
                 raise TransitionError(str(exc)) from exc
+            errors = validate_deferred_interest(
+                copied, mission_id=manifest.mission_id
+            )
+            if errors:
+                raise TransitionError(errors[0])
             continuity["deferred_interests"].append(copied)
+            decision_extra["critical_path_clearance"] = deepcopy(
+                copied.get("critical_path_clearance")
+            )
 
         elif proposal_kind == "return_rebind":
             _require_mission_steward(event)
-            invalidate = payload.get("invalidate")
+            invalidate = content.get("invalidate")
             if not isinstance(invalidate, list) or not invalidate:
                 raise TransitionError("RETURN_REBIND_INVALIDATE_REQUIRED")
-            invalidated = deepcopy(invalidate)
-            decision_extra["invalidate"] = invalidated
+            decision_extra["invalidate"] = deepcopy(invalidate)
 
         elif proposal_kind == "absorb":
-            idx = payload.get("interest_index")
+            idx = content.get("interest_index")
             if isinstance(idx, bool) or not isinstance(idx, int):
                 raise TransitionError("ABSORB_INTEREST_INDEX_REQUIRED")
             interests = continuity["deferred_interests"]
@@ -453,10 +693,9 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 raise TransitionError("ABSORB_INTEREST_NOT_FOUND")
             if interest.get("status") != "open":
                 raise TransitionError("ABSORB_INTEREST_NOT_OPEN")
-            criticality = interest.get("criticality")
-            if criticality == "high":
+            if interest.get("criticality") == "high":
                 _operator_only(manifest, event)
-                amendment = payload.get("amendment")
+                amendment = content.get("amendment")
                 if not isinstance(amendment, str) or not amendment.strip():
                     raise TransitionError("HIGH_ABSORB_AMENDMENT_REQUIRED")
                 authority["amendments"].append(amendment.strip())
@@ -473,6 +712,9 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             {
                 "kind": "mission-os-apply",
                 "proposal_kind": proposal_kind,
+                "proposal_id": proposal_meta["proposal_id"],
+                "base_revision": proposal_meta["base_revision"],
+                "payload_sha256": proposal_meta["payload_sha256"],
                 "actor_ref": event.actor_ref,
                 "at_revision": new_revision,
                 **decision_extra,
@@ -483,6 +725,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
     if isinstance(checkpoint_ref, str) and checkpoint_ref.strip():
         continuity["prior_checkpoint"] = checkpoint_ref
 
+    continuity["processed_event_ids"].append(event.event_id)
     data["revision"] = manifest.revision + 1
     if authority.get("instruction") != original_instruction:
         raise TransitionError("OPERATOR_INSTRUCTION_MUTATED")

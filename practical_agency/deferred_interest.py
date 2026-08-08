@@ -16,6 +16,7 @@ _REQUIRED = {
     "created_at_revision",
     "status",
 }
+_ALLOWED = _REQUIRED | {"critical_path_clearance"}
 
 
 def _nonempty_string(value: object) -> bool:
@@ -41,7 +42,7 @@ def validate_deferred_interest(
     if not isinstance(obj, Mapping):
         return ["DEFERRED_INTEREST_MUST_BE_OBJECT"]
     errors: list[str] = []
-    if set(obj) - _REQUIRED:
+    if set(obj) - _ALLOWED:
         errors.append("DEFERRED_INTEREST_UNKNOWN_FIELD")
     if _REQUIRED - set(obj):
         errors.append("DEFERRED_INTEREST_MISSING_FIELD")
@@ -70,4 +71,16 @@ def validate_deferred_interest(
         errors.append("DEFERRED_INTEREST_SUBJECT_REFS")
     elif obj.get("criticality") == "high" and not refs:
         errors.append("SUBJECT_REFS_REQUIRED")
+    clearance = obj.get("critical_path_clearance")
+    if clearance is not None:
+        if not isinstance(clearance, Mapping) or set(clearance) != {"reason", "basis_refs"}:
+            errors.append("CRITICAL_PATH_CLEARANCE_INVALID")
+        else:
+            if not _nonempty_string(clearance.get("reason")):
+                errors.append("CRITICAL_PATH_CLEARANCE_REASON")
+            basis_refs = clearance.get("basis_refs")
+            if not isinstance(basis_refs, list) or not basis_refs or any(
+                not _nonempty_string(ref) for ref in basis_refs
+            ):
+                errors.append("CRITICAL_PATH_CLEARANCE_BASIS_REFS")
     return errors

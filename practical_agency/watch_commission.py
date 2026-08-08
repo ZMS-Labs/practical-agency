@@ -246,20 +246,29 @@ def handle_crossing_event(
         raise CommissionIntegrationError("COMMISSION_NOT_OPERATING")
 
     data = manifest.to_dict()
-    data["state"]["status"] = MissionStatus.ACTIVE.value
-    frontier = f"triage crossing for commission {commission_id}"
-    if frontier not in data["state"]["current_frontier"]:
-        data["state"]["current_frontier"].insert(0, frontier)
-    data["state"]["next_action"] = frontier
     data["continuity"]["external_handoffs"].append(
         {
             "kind": "watch-crossing",
             "commission_id": commission_id,
             "event_ref": event_ref,
             "observed_at": observed_at,
-            "hands_to": ["triage", "decision-ledger"],
+            "condition": (
+                f"Commission {commission_id} observed a bound crossing; "
+                "its consequences for the authorized mission remain unresolved."
+            ),
+            "expected_output_contract": (
+                "Return a revision-bound mission-OS replan proposal citing "
+                "this event_ref, or a durable decision that no replan is required."
+            ),
+            "return_point": {
+                "mission_id": manifest.mission_id,
+                "mission_revision": manifest.revision,
+                "status": manifest.state.get("status"),
+            },
         }
     )
+    # Crossing ingestion owns only its durable observation. The steward remains
+    # the sole writer of status, frontier, and next-action state.
     data["revision"] = manifest.revision + 1
     return MissionManifest.from_dict(data)
 

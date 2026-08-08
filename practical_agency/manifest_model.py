@@ -37,6 +37,11 @@ class MissionManifest:
         from practical_agency.validation import validate_manifest_dict
 
         copied = deepcopy(dict(payload))
+        continuity = copied.get("continuity")
+        if isinstance(continuity, dict):
+            continuity.setdefault("deferred_interests", [])
+            continuity.setdefault("processed_event_ids", [])
+            continuity.setdefault("execution_receipts", [])
         errors = validate_manifest_dict(copied)
         if errors:
             raise ValueError("INVALID_MISSION_MANIFEST: " + " | ".join(errors))

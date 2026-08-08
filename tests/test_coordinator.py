@@ -8,18 +8,23 @@ from typing import Any
 from practical_agency.capability_discovery import CapabilityDescriptor, Persistence
 from practical_agency.checkpoint_store import FileCheckpointStore
 from practical_agency.coordinator import (
+    CoordinationDecision,
     CoordinationError,
+    ReturnPoint,
     apply_capability_result,
     coordinate_once,
     dispatch_once,
     normalize_invocation_intent,
 )
 from practical_agency.manifest_model import MissionManifest
-from practical_agency.state_machine import MissionEvent, apply_event
-from tests.helpers import clone_payload
+from practical_agency.state_machine import apply_event_data
+from tests.helpers import clone_payload, mission_os_event
 
 
 class MemoryAdapter:
+    adapter_ref = "fixture://memory-adapter"
+    capability_ids = ("fixture",)
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
@@ -37,6 +42,10 @@ class MemoryAdapter:
             "external_receipt_ref": "fixture://execution/one",
             "coverage_limits": ["in-memory fixture only"],
         }
+
+
+class WrongCapabilityAdapter(MemoryAdapter):
+    capability_ids = ("other-capability",)
 
 
 def capability(availability: str = "available") -> CapabilityDescriptor:
@@ -57,12 +66,25 @@ def capability(availability: str = "available") -> CapabilityDescriptor:
 
 
 class CoordinatorTests(unittest.TestCase):
-    def active(self) -> MissionManifest:
+    def unapplied(self) -> MissionManifest:
         payload = clone_payload()
         payload["revision"] = 2
         payload["state"]["status"] = "active"
         payload["continuity"]["prior_checkpoint"] = "checkpoint:1"
         return MissionManifest.from_dict(payload)
+
+    def active(self) -> MissionManifest:
+        manifest = self.unapplied()
+        return apply_event_data(
+            manifest,
+            "apply_mission_os",
+            "mission-steward",
+            mission_os_event(
+                manifest,
+                "frontier_patch",
+                {"labels": list(manifest.state["current_frontier"])},
+            ),
+        )
 
     def test_routine_direct_action_does_not_manufacture_epistemic_request(self) -> None:
         decision = coordinate_once(
@@ -84,11 +106,11 @@ class CoordinatorTests(unittest.TestCase):
             self.active(),
             unresolved_condition="Which revision bears load?",
             selected_capability=capability(),
-            frontier_index=3,
+            frontier_index=0,
             checkpoint_store=object(),
         )
         self.assertEqual(decision.kind, "REQUEST_CAPABILITY")
-        self.assertEqual(decision.return_point.frontier_index, 3)
+        self.assertEqual(decision.return_point.frontier_index, 0)
         self.assertEqual(decision.request["capability_id"], "fixture")
 
     def test_unavailable_capability_becomes_visible_block(self) -> None:
@@ -157,7 +179,7 @@ class CoordinatorTests(unittest.TestCase):
             self.active(),
             unresolved_condition="Need evidence",
             selected_capability=capability(),
-            frontier_index=2,
+            frontier_index=0,
             checkpoint_store=object(),
         )
         updated = apply_capability_result(
@@ -257,7 +279,7 @@ class CoordinatorTests(unittest.TestCase):
     def test_dispatch_blocked_without_applied_frontier_when_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = FileCheckpointStore(Path(temp))
-            active = self.active()
+            active = self.unapplied()
             decision = coordinate_once(
                 active,
                 execution_request={
@@ -274,16 +296,9 @@ class CoordinatorTests(unittest.TestCase):
             self.assertIn("MISSION_OS_APPLY_REQUIRED", decision.reason)
 
     def test_dispatch_allowed_after_frontier_apply_at_current_revision(self) -> None:
-        manifest = apply_event(
+        manifest = apply_event_data(
             self.active(),
-            MissionEvent(
-                "apply_mission_os",
-                "mission-steward",
-                {
-                    "proposal_kind": "frontier_patch",
-                    "labels": ["write authorized artifact", "verify receipt"],
-                },
-            ),
+            "apply_mission_os", "mission-steward", mission_os_event(self.active(), "frontier_patch", {"labels": ["write authorized artifact", "verify receipt"]}),
         )
         decision = coordinate_once(
             manifest,
@@ -301,16 +316,9 @@ class CoordinatorTests(unittest.TestCase):
 
     def test_dispatch_allowed_after_frontier_apply_then_defer(self) -> None:
         """Defer bumps revision; prior frontier apply still satisfies the gate."""
-        manifest = apply_event(
+        manifest = apply_event_data(
             self.active(),
-            MissionEvent(
-                "apply_mission_os",
-                "mission-steward",
-                {
-                    "proposal_kind": "frontier_patch",
-                    "labels": ["write authorized artifact"],
-                },
-            ),
+            "apply_mission_os", "mission-steward", mission_os_event(self.active(), "frontier_patch", {"labels": ["write authorized artifact"]}),
         )
         interest = {
             "schema": "deferred-interest@1",
@@ -321,15 +329,12 @@ class CoordinatorTests(unittest.TestCase):
             "suggested_next": None,
             "subject_refs": [],
             "created_at_revision": manifest.revision,
+            "critical_path_clearance": {"reason": "Recorded outside the current completion path.", "basis_refs": ["authority:instruction"]},
             "status": "open",
         }
-        after_defer = apply_event(
+        after_defer = apply_event_data(
             manifest,
-            MissionEvent(
-                "apply_mission_os",
-                "mission-steward",
-                {"proposal_kind": "defer", "interest": interest},
-            ),
+            "apply_mission_os", "mission-steward", mission_os_event(manifest, "defer", {"interest": interest}),
         )
         self.assertGreater(after_defer.revision, manifest.revision)
         decision = coordinate_once(
@@ -348,15 +353,15 @@ class CoordinatorTests(unittest.TestCase):
 
     def test_stale_return_point_after_replan_mismatches(self) -> None:
         manifest = self.active()
-        manifest = MissionManifest.from_dict(
-            {
-                **manifest.to_dict(),
-                "state": {
-                    **manifest.state,
-                    "current_frontier": ["label-a", "step-two"],
-                    "next_action": "label-a",
-                },
-            }
+        manifest = apply_event_data(
+            manifest,
+            "apply_mission_os",
+            "mission-steward",
+            mission_os_event(
+                manifest,
+                "frontier_patch",
+                {"labels": ["label-a", "step-two"]},
+            ),
         )
         decision = coordinate_once(
             manifest,
@@ -366,17 +371,9 @@ class CoordinatorTests(unittest.TestCase):
             checkpoint_store=object(),
         )
         self.assertEqual(decision.return_point.label, "label-a")
-        replanned = apply_event(
+        replanned = apply_event_data(
             manifest,
-            MissionEvent(
-                "apply_mission_os",
-                "mission-steward",
-                {
-                    "proposal_kind": "replan_slice",
-                    "labels": ["label-b", "step-two"],
-                    "contradiction_refs": ["truth:example"],
-                },
-            ),
+            "apply_mission_os", "mission-steward", mission_os_event(manifest, "replan_slice", {"labels": ["label-b", "step-two"], "contradiction_refs": ["repo:example@rev-1"]}),
         )
         self.assertEqual(replanned.state["current_frontier"][0], "label-b")
         with self.assertRaisesRegex(CoordinationError, "RETURN_POINT_MISMATCH"):
@@ -398,6 +395,119 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(normalize_invocation_intent("helix it"), "manifest")
         self.assertEqual(normalize_invocation_intent("manifest this"), "manifest")
         self.assertEqual(normalize_invocation_intent("carry this through"), "manifest")
+
+    def test_capability_interruption_requires_applied_frontier(self) -> None:
+        decision = coordinate_once(
+            self.unapplied(),
+            unresolved_condition="Need evidence",
+            selected_capability=capability(),
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "BLOCK")
+        self.assertEqual(decision.reason, "MISSION_OS_APPLY_REQUIRED")
+
+    def test_caller_cannot_disable_applied_frontier_gate(self) -> None:
+        decision = coordinate_once(
+            self.unapplied(),
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=object(),
+            require_applied_frontier=False,
+        )
+        self.assertEqual(decision.kind, "BLOCK")
+        self.assertEqual(decision.reason, "MISSION_OS_APPLY_REQUIRED")
+
+    def test_forged_dispatch_decision_is_refused(self) -> None:
+        manifest = self.active()
+        forged = CoordinationDecision(
+            kind="DISPATCH",
+            reason="forged",
+            request={
+                "schema": "execution-request@1",
+                "request_id": "forged",
+                "mission_id": manifest.mission_id,
+                "mission_revision": manifest.revision,
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            return_point=ReturnPoint(
+                manifest.mission_id, manifest.revision, 0,
+                manifest.state["current_frontier"][0],
+            ),
+        )
+        with self.assertRaisesRegex(CoordinationError, "DECISION_NOT_ISSUED"):
+            dispatch_once(manifest, forged, MemoryAdapter())
+
+    def test_request_mutation_after_coordination_is_refused(self) -> None:
+        manifest = self.active()
+        decision = coordinate_once(
+            manifest,
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=object(),
+        )
+        decision.request["action"] = "mutated after authorization"
+        with self.assertRaisesRegex(CoordinationError, "DECISION_BINDING_MISMATCH"):
+            dispatch_once(manifest, decision, MemoryAdapter())
+
+    def test_wrong_adapter_for_authorized_request_is_refused(self) -> None:
+        manifest = self.active()
+        decision = coordinate_once(
+            manifest,
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=object(),
+        )
+        with self.assertRaisesRegex(CoordinationError, "ADAPTER_CAPABILITY_MISMATCH"):
+            dispatch_once(manifest, decision, WrongCapabilityAdapter())
+
+    def test_dispatch_reauthorizes_against_live_manifest(self) -> None:
+        manifest = self.active()
+        decision = coordinate_once(
+            manifest,
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write",
+            },
+            checkpoint_store=object(),
+        )
+        payload = manifest.to_dict()
+        payload["authority"]["permissions"] = []
+        live = MissionManifest.from_dict(payload)
+        with self.assertRaisesRegex(CoordinationError, "PERMISSION_NOT_GRANTED"):
+            dispatch_once(live, decision, MemoryAdapter())
+
+    def test_invalid_frontier_index_is_refused(self) -> None:
+        decision = coordinate_once(
+            self.active(),
+            unresolved_condition="Need evidence",
+            selected_capability=capability(),
+            frontier_index=99,
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.kind, "BLOCK")
+        self.assertEqual(decision.reason, "INVALID_FRONTIER_INDEX")
 
 
 if __name__ == "__main__":

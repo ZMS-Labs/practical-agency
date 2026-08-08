@@ -126,6 +126,15 @@ class MissionManifestTests(unittest.TestCase):
         payload["state"]["status"] = "active"
         self.assertTrue(any(x.startswith("PRIOR_CHECKPOINT_REQUIRED:") for x in validate_manifest_dict(payload)))
 
+    def test_deferred_interests_container_must_be_an_array(self) -> None:
+        payload = clone_payload()
+        payload["continuity"]["deferred_interests"] = {"not": "an array"}
+        errors = validate_manifest_dict(payload)
+        self.assertIn(
+            "INVALID_OBJECT_LIST: continuity.deferred_interests must be an array",
+            errors,
+        )
+
     def test_load_manifest_validates_and_reads_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "mission.json"

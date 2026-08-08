@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,6 +89,48 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         joined = "\n".join(path.read_text(encoding="utf-8") for path in production.glob("*.py"))
         for forbidden in ("gauntlet", "metacognate", "write-goal"):
             self.assertNotIn(forbidden, joined.lower())
+
+
+    def test_unknown_metadata_is_forward_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            skill = write_skill(root, "alpha", "Use for alpha.")
+            text = skill.read_text(encoding="utf-8").replace(
+                "  persistence: session\n",
+                "  persistence: session\n  hands-to: []\n",
+            )
+            skill.write_text(text, encoding="utf-8")
+            item = FileSystemSkillProvider(root).discover()[0]
+            self.assertEqual(item.availability, "available")
+            self.assertIsNone(item.degradation_reason)
+            self.assertEqual(item.metadata["hands-to"], ())
+
+    def test_malformed_recognized_metadata_still_degrades(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            skill = write_skill(root, "alpha", "Use for alpha.")
+            text = skill.read_text(encoding="utf-8").replace(
+                "  authority_required: [repository:read]",
+                "  authority_required: repository:read",
+            )
+            skill.write_text(text, encoding="utf-8")
+            item = FileSystemSkillProvider(root).discover()[0]
+            self.assertEqual(item.availability, "degraded")
+            self.assertIn("UNSUPPORTED_LIST_SYNTAX", item.degradation_reason or "")
+
+    def test_pinned_upstream_descriptors_are_discovered_without_inventory(self) -> None:
+        raw = os.environ.get("PRACTICAL_AGENCY_UPSTREAM_SKILLS_DIR")
+        if raw is None:
+            self.skipTest("pinned upstream skills directory not mounted")
+        root = Path(raw)
+        expected = sorted(
+            child.name for child in root.iterdir()
+            if child.is_dir() and child.joinpath("SKILL.md").is_file()
+        )
+        found = FileSystemSkillProvider(root).discover()
+        self.assertEqual([item.capability_id for item in found], expected)
+        self.assertTrue(found)
+        self.assertTrue(all(item.availability == "available" for item in found))
 
 
 if __name__ == "__main__":

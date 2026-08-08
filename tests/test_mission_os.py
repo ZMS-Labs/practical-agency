@@ -59,6 +59,7 @@ class MissionOsProposeTests(unittest.TestCase):
             "suggested_next": None,
             "subject_refs": ["ref:a"],
             "created_at_revision": 2,
+            "critical_path_clearance": {"reason": "Recorded outside the current completion path.", "basis_refs": ["authority:instruction"]},
             "status": "open",
         }
         proposal = propose_defer(manifest, interest)
@@ -86,6 +87,7 @@ class MissionOsProposeTests(unittest.TestCase):
             "suggested_next": None,
             "subject_refs": [],
             "created_at_revision": 2,
+            "critical_path_clearance": {"reason": "Recorded outside the current completion path.", "basis_refs": ["authority:instruction"]},
             "status": "open",
         }
         with self.assertRaisesRegex(ValueError, "DEFER_CRITICAL_PATH"):
@@ -116,6 +118,47 @@ class MissionOsProposeTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("skills/", source)
         self.assertIsNone(re.search(r"stage[_\s-]*map\s*[:=]", source, re.I))
+
+    def test_proposal_is_bound_to_mission_revision_and_payload(self) -> None:
+        proposal = propose_frontier_patch(
+            self.active(),
+            ["write authorized artifact"],
+            basis_refs=["authority:instruction"],
+        )
+        body = proposal.to_dict()
+        self.assertEqual(body["schema"], "mission-os-proposal@1")
+        self.assertEqual(body["mission_id"], "mission-001")
+        self.assertEqual(body["base_revision"], 2)
+        self.assertEqual(len(body["payload_sha256"]), 64)
+
+    def test_frontier_basis_must_resolve(self) -> None:
+        with self.assertRaisesRegex(ValueError, "MISSION_OS_BASIS_UNRESOLVED"):
+            propose_frontier_patch(
+                self.active(),
+                ["invent unrelated objective"],
+                basis_refs=["truth:not-recorded"],
+            )
+
+    def test_invalid_return_point_index_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "INVALID_FRONTIER_INDEX"):
+            emit_unanswered_condition(
+                self.active(), "bounded question", frontier_index=99
+            )
+
+    def test_defer_requires_recorded_critical_path_clearance(self) -> None:
+        interest = {
+            "schema": "deferred-interest@1",
+            "mission_id": "mission-001",
+            "summary": "possibly relevant follow-up",
+            "criticality": "low",
+            "why_not_now": "not established",
+            "suggested_next": None,
+            "subject_refs": [],
+            "created_at_revision": 999,
+            "status": "open",
+        }
+        with self.assertRaisesRegex(ValueError, "DEFER_CRITICAL_PATH_AMBIGUOUS"):
+            propose_defer(self.active(), interest)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import unittest
 from typing import Any, Mapping
 
 from practical_agency.manifest_model import MissionManifest
+from practical_agency.mission_os import propose_replan_slice
+from practical_agency.state_machine import apply_event_data
 from practical_agency.watch_commission import (
     CommissionIntegrationError,
     accept_external_commission,
@@ -166,10 +168,12 @@ class WatchCommissionAdapterTests(unittest.TestCase):
         with self.assertRaises(CommissionIntegrationError):
             retain_commission(self.manifest(), rejected)
 
-    def test_crossing_event_reopens_mission_frontier(self) -> None:
+    def test_crossing_records_condition_without_writing_frontier(self) -> None:
         payload = clone_payload()
         payload["revision"] = 5
         payload["state"]["status"] = "completed"
+        payload["state"]["current_frontier"] = []
+        payload["state"]["next_action"] = None
         payload["continuity"]["prior_checkpoint"] = "checkpoint:4"
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         payload["continuity"]["watch_commissions"] = [
@@ -180,7 +184,7 @@ class WatchCommissionAdapterTests(unittest.TestCase):
             }
         ]
         manifest = MissionManifest.from_dict(payload)
-        reopened = handle_crossing_event(
+        observed = handle_crossing_event(
             manifest,
             {
                 "commission_id": "wc-1",
@@ -188,8 +192,32 @@ class WatchCommissionAdapterTests(unittest.TestCase):
                 "observed_at": "2026-08-07T13:00:00Z",
             },
         )
+        self.assertEqual(observed.state, manifest.state)
+        handoff = observed.continuity["external_handoffs"][-1]
+        self.assertEqual(handoff["event_ref"], "external-event://1")
+        self.assertIn("condition", handoff)
+        self.assertIn("expected_output_contract", handoff)
+        self.assertIn("return_point", handoff)
+        self.assertNotIn("hands_to", handoff)
+        self.assertNotIn("triage", str(handoff).casefold())
+        self.assertNotIn("decision-ledger", str(handoff).casefold())
+
+        proposal = propose_replan_slice(
+            observed,
+            new_frontier=["assess the observed crossing"],
+            contradiction_refs=["external-event://1"],
+        )
+        reopened = apply_event_data(
+            observed,
+            "apply_mission_os",
+            "mission-steward",
+            proposal.to_event_data(),
+        )
         self.assertEqual(reopened.state["status"], "active")
-        self.assertIn("triage crossing for commission wc-1", reopened.state["current_frontier"])
+        self.assertEqual(
+            reopened.state["current_frontier"],
+            ["assess the observed crossing"],
+        )
 
     def test_crossing_requires_a_retained_commission(self) -> None:
         payload = clone_payload()

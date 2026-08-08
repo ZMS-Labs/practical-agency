@@ -6,7 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from practical_agency.filesystem_artifact import FilesystemArtifactAdapter
+from practical_agency.filesystem_artifact import (
+    FilesystemArtifactAdapter,
+    FilesystemArtifactError,
+    verify_filesystem_receipt,
+)
 
 
 def _request(**overrides: object) -> dict[str, object]:
@@ -84,8 +88,8 @@ class FilesystemArtifactAdapterTests(unittest.TestCase):
         from practical_agency.checkpoint_store import FileCheckpointStore
         from practical_agency.coordinator import coordinate_once, dispatch_once
         from practical_agency.manifest_model import MissionManifest
-        from practical_agency.state_machine import MissionEvent, apply_event
-        from tests.helpers import clone_payload
+        from practical_agency.state_machine import apply_event_data
+        from tests.helpers import clone_payload, mission_os_event
 
         payload = clone_payload()
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
@@ -99,12 +103,18 @@ class FilesystemArtifactAdapterTests(unittest.TestCase):
             root = Path(temp)
             store = FileCheckpointStore(root / "checkpoints")
             first = store.save(draft)
-            active = apply_event(
+            active = apply_event_data(
                 draft,
-                MissionEvent(
-                    "approve",
-                    "operator:test",
-                    {"checkpoint_ref": first.path},
+                "approve", "operator:test", {"checkpoint_ref": first.path},
+            )
+            active = apply_event_data(
+                active,
+                "apply_mission_os",
+                "mission-steward",
+                mission_os_event(
+                    active,
+                    "frontier_patch",
+                    {"labels": ["write filesystem artifact"]},
                 ),
             )
             adapter = FilesystemArtifactAdapter(root / "world")
@@ -127,6 +137,92 @@ class FilesystemArtifactAdapterTests(unittest.TestCase):
             written = root / "world" / "mission-artifacts" / "from-mission.txt"
             self.assertEqual(written.read_text(encoding="utf-8"), "world effect")
             self.assertTrue(Path(str(result["external_receipt_ref"])).is_file())
+
+    def test_receipt_filename_is_digest_not_request_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            adapter = FilesystemArtifactAdapter(root)
+            receipt = adapter.dispatch(_request(request_id="mission/unsafe:request"))
+            external = Path(str(receipt["external_receipt_ref"]))
+            self.assertEqual(external.parent, (root / ".receipts").resolve())
+            self.assertNotIn("/", external.name)
+            self.assertEqual(len(external.stem), 64)
+
+    def test_failure_before_effect_leaves_failed_journal_and_no_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            adapter = FilesystemArtifactAdapter(root, fail_at="before_effect")
+            with self.assertRaisesRegex(FilesystemArtifactError, "INJECTED_BEFORE_EFFECT"):
+                adapter.dispatch(_request())
+            self.assertFalse((root / "mission-artifacts" / "note.txt").exists())
+            journals = list((root / ".receipts").glob("*.json"))
+            self.assertEqual(len(journals), 1)
+            self.assertEqual(json.loads(journals[0].read_text())["state"], "failed")
+
+    def test_failure_after_effect_is_visible_as_uncertain_not_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            adapter = FilesystemArtifactAdapter(root, fail_at="after_effect")
+            with self.assertRaisesRegex(FilesystemArtifactError, "INJECTED_AFTER_EFFECT"):
+                adapter.dispatch(_request())
+            self.assertTrue((root / "mission-artifacts" / "note.txt").is_file())
+            journal = next((root / ".receipts").glob("*.json"))
+            self.assertEqual(json.loads(journal.read_text())["state"], "uncertain")
+
+    def test_receipt_verifier_recomputes_artifact_hash_and_rejects_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            adapter = FilesystemArtifactAdapter(root)
+            result = adapter.dispatch(_request())
+            verified = verify_filesystem_receipt(
+                str(result["external_receipt_ref"]), _request(), root
+            )
+            self.assertEqual(verified["state"], "committed")
+            (root / "mission-artifacts" / "note.txt").write_text("tampered")
+            with self.assertRaisesRegex(FilesystemArtifactError, "ARTIFACT_HASH_MISMATCH"):
+                verify_filesystem_receipt(
+                    str(result["external_receipt_ref"]), _request(), root
+                )
+
+    def test_committed_request_replay_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = FilesystemArtifactAdapter(root).dispatch(_request())
+            replay = FilesystemArtifactAdapter(
+                root, fail_at="before_effect"
+            ).dispatch(_request())
+            self.assertEqual(replay["status"], "completed")
+            self.assertEqual(
+                replay["external_receipt_ref"], first["external_receipt_ref"]
+            )
+            self.assertIn(
+                "replayed idempotently", " ".join(replay["coverage_limits"])
+            )
+
+    def test_same_request_id_with_different_payload_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            adapter = FilesystemArtifactAdapter(root)
+            adapter.dispatch(_request())
+            with self.assertRaisesRegex(FilesystemArtifactError, "REQUEST_ID_COLLISION"):
+                adapter.dispatch(
+                    _request(
+                        requested_effects=[
+                            "relpath:mission-artifacts/note.txt",
+                            "utf8:different content",
+                        ]
+                    )
+                )
+
+    def test_missing_external_receipt_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            result = FilesystemArtifactAdapter(root).dispatch(_request())
+            Path(str(result["external_receipt_ref"])).unlink()
+            with self.assertRaisesRegex(FilesystemArtifactError, "RECEIPT_NOT_FOUND"):
+                verify_filesystem_receipt(
+                    str(result["external_receipt_ref"]), _request(), root
+                )
 
 
 if __name__ == "__main__":

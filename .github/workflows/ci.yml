@@ -18,15 +18,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Export isolated hardening workspace
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: practical-agency-source-${{ github.sha }}
-          path: |
-            .
-            !.git
-          include-hidden-files: true
-          retention-days: 1
       - name: Fetch pinned commission-watch contract outside product tree
         run: |
           upstream="$RUNNER_TEMP/epistemic-skills"

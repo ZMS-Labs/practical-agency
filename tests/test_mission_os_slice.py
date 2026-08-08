@@ -7,11 +7,14 @@ from pathlib import Path
 
 from practical_agency.checkpoint_store import FileCheckpointStore
 from practical_agency.coordinator import coordinate_once, dispatch_once
-from practical_agency.filesystem_artifact import FilesystemArtifactAdapter
+from practical_agency.filesystem_artifact import (
+    FilesystemArtifactAdapter,
+    verify_filesystem_receipt,
+)
 from practical_agency.manifest_model import MissionManifest
 from practical_agency.mission_os import propose_defer, propose_frontier_patch
-from practical_agency.state_machine import MissionEvent, TransitionError, apply_event
-from tests.helpers import clone_payload
+from practical_agency.state_machine import TransitionError, apply_event_data
+from tests.helpers import clone_payload, mission_os_event
 
 
 class MissionOsSliceTests(unittest.TestCase):
@@ -32,22 +35,18 @@ class MissionOsSliceTests(unittest.TestCase):
             store = FileCheckpointStore(root / "checkpoints")
             world = root / "world"
             receipt0 = store.save(draft)
-            active = apply_event(
+            active = apply_event_data(
                 draft,
-                MissionEvent("approve", "operator:test", {"checkpoint_ref": receipt0.path}),
+                "approve", "operator:test", {"checkpoint_ref": receipt0.path},
             )
 
             proposal = propose_frontier_patch(
                 active,
                 ["write authorized artifact", "observe receipt"],
             )
-            active = apply_event(
+            active = apply_event_data(
                 active,
-                MissionEvent(
-                    "apply_mission_os",
-                    "mission-steward",
-                    {"proposal_kind": proposal.kind, **proposal.payload},
-                ),
+                "apply_mission_os", "mission-steward", mission_os_event(active, proposal.kind, {**proposal.payload}),
             )
 
             defer_prop = propose_defer(
@@ -61,16 +60,13 @@ class MissionOsSliceTests(unittest.TestCase):
                     "suggested_next": None,
                     "subject_refs": [],
                     "created_at_revision": active.revision,
+                    "critical_path_clearance": {"reason": "Recorded outside the current completion path.", "basis_refs": ["authority:instruction"]},
                     "status": "open",
                 },
             )
-            active = apply_event(
+            active = apply_event_data(
                 active,
-                MissionEvent(
-                    "apply_mission_os",
-                    "mission-steward",
-                    {"proposal_kind": defer_prop.kind, **defer_prop.payload},
-                ),
+                "apply_mission_os", "mission-steward", mission_os_event(active, defer_prop.kind, {**defer_prop.payload}),
             )
             self.assertEqual(len(active.continuity["deferred_interests"]), 1)
             self.assertEqual(
@@ -97,69 +93,68 @@ class MissionOsSliceTests(unittest.TestCase):
             result = dispatch_once(active, decision, adapter)
             self.assertEqual(result["status"], "completed")
 
-            acted = apply_event(
+            recorded = apply_event_data(
                 active,
-                MissionEvent(
-                    "record_action",
-                    "mission-steward",
-                    {"action_ref": result["artifact_refs"][0]},
-                ),
+                "record_execution_receipt",
+                "mission-steward",
+                {"receipt": result, "request": decision.request},
             )
-            observed = apply_event(
+            acted = apply_event_data(
+                recorded,
+                "record_action", "mission-steward", {"action_ref": result["artifact_refs"][0]},
+            )
+            observed = apply_event_data(
                 acted,
-                MissionEvent(
-                    "record_observation",
-                    "observer:test",
-                    {
+                "record_observation", "observer:test", {
                         "artifact_ref": "artifact:validator-pass",
                         "fact": {
                             "subject_ref": "artifact:os-slice",
                             "value": "os-slice-body",
                         },
                     },
-                ),
             )
             ckpt = store.save(observed)
 
-            del draft, active, acted, observed, decision, result
+            del draft, active, recorded, acted, observed, decision, result
             resumed = store.load(ckpt)
             self.assertEqual(resumed.authority["instruction"], original)
             self.assertEqual(len(resumed.continuity["deferred_interests"]), 1)
-            self.assertTrue(
-                (world / "mission-artifacts" / "os-slice.txt").is_file()
+            self.assertEqual(len(resumed.continuity["execution_receipts"]), 1)
+            persisted_receipt = resumed.continuity["execution_receipts"][0]
+            verified_receipt = verify_filesystem_receipt(
+                persisted_receipt["external_receipt_ref"],
+                persisted_receipt["request"],
+                world,
+            )
+            self.assertEqual(verified_receipt["state"], "committed")
+            self.assertEqual(
+                verified_receipt["artifact_sha256"],
+                persisted_receipt["observed_effects"][0]["sha256"],
             )
 
-            verifying = apply_event(
-                resumed, MissionEvent("begin_verification", "mission-steward", {})
+            verifying = apply_event_data(
+                resumed, "begin_verification", "mission-steward", {}
             )
             with self.assertRaisesRegex(
                 TransitionError, "INDEPENDENT_ACCEPTANCE_REQUIRED"
             ):
-                apply_event(
+                apply_event_data(
                     verifying,
-                    MissionEvent(
-                        "accept",
-                        "mission-steward",
-                        {
+                    "accept", "mission-steward", {
                             "verdict": "PASS",
                             "evidence_refs": ["artifact:validator-pass"],
                             "coverage_limits": ["fixture slice"],
                         },
-                    ),
                 )
-            completed = apply_event(
+            completed = apply_event_data(
                 verifying,
-                MissionEvent(
-                    "accept",
-                    "reviewer:test",
-                    {
+                "accept", "reviewer:test", {
                         "verdict": "PASS",
                         "evidence_refs": ["artifact:validator-pass"],
                         "coverage_limits": [
                             "fixture slice only — NOT field v1 / RELEASE-1.0.0"
                         ],
                     },
-                ),
             )
             self.assertEqual(completed.state["status"], "completed")
 

@@ -140,17 +140,20 @@ Forbidden without append-only authority amendment: any byte change to
 `authority.instruction`, `outcome.desired_state`, or removing/weakening
 `completion_proof` / `integrity_guards` / `scope_proof` / `stop_conditions`.
 
-Frontier labels must be entailed by instruction, amendments, desired state, or
-live contradictions — not novel aims. `suggested_next` on a deferred interest is
-a non-binding hint and cannot expand ends on absorb.
+Frontier labels must carry resolvable `basis_refs` to the instruction, an
+amendment, desired state, a live contradiction, or another durable observation.
+The deterministic kernel verifies those references and records them; it does not
+claim to prove unrestricted natural-language entailment. `suggested_next` on a
+deferred interest is a non-binding hint and cannot expand ends on absorb.
 
 ### Defer constraints (P1)
 
 - Refuse defer when the candidate is necessary for any unmet
   `completion_proof` / `scope_proof` item, or is the sole open path to desired
   state.
-- If necessity is ambiguous → keep on frontier or escalate; do not “optimistically”
-  park.
+- If necessity is ambiguous → require explicit recorded critical-path clearance
+  with resolvable basis references, or keep on frontier/escalate; do not
+  “optimistically” park.
 - `criticality`: steward/operator-set or closed rule; `high` requires nonempty
   `subject_refs`. Under-classifying work that touches protected state or
   completion-proof subjects to avoid gates is a defect.
@@ -179,6 +182,7 @@ Minimum fields:
 | `subject_refs` | Optional list; required when `criticality` is `high` |
 | `created_at_revision` | Mission revision when parked |
 | `status` | `open` \| `absorbed` \| `discarded` |
+| `critical_path_clearance` | Optional on stored legacy records; required for new defer proposals, with a reason and resolvable `basis_refs` |
 
 **Proportionality:** low → one line; medium → short rationale; high → rationale
 plus `subject_refs`.
@@ -246,7 +250,8 @@ Iron turn rules:
 
 Deterministic tests (RED → GREEN → REFACTOR) must cover:
 
-1. Frontier re-plan after live-state contradiction (no ends invented).
+1. Frontier re-plan after live-state contradiction with resolvable provenance;
+   no claim that string processing alone proves semantic entailment.
 2. Deferred interest created while critical frontier unchanged; refuse defer of
    completion-proof-necessary work.
 3. Capability interrupt restores exact `ReturnPoint` (index + label); re-plan

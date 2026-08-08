@@ -382,8 +382,46 @@
                   "absorbed",
                   "discarded"
                 ]
+              },
+              "critical_path_clearance": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason",
+                  "basis_refs"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "basis_refs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                }
               }
             }
+          }
+        },
+        "processed_event_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "execution_receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-practical-agency-open": true
           }
         }
       }

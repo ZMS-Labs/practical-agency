@@ -55,6 +55,8 @@ def minimal_payload() -> dict[str, Any]:
             "external_handoffs": [],
             "watch_commissions": [],
             "deferred_interests": [],
+            "processed_event_ids": [],
+            "execution_receipts": [],
         },
         "integrity": {
             "actor_may_self_accept": False,
@@ -67,3 +69,55 @@ def minimal_payload() -> dict[str, Any]:
 
 def clone_payload() -> dict[str, Any]:
     return deepcopy(minimal_payload())
+
+
+def mission_os_event(
+    manifest: "MissionManifest", kind: str, content: dict[str, Any]
+) -> dict[str, Any]:
+    """Return a validated, revision-bound mission-OS event payload for tests."""
+    from practical_agency.mission_os import (
+        propose_absorb,
+        propose_defer,
+        propose_frontier_patch,
+        propose_replan_slice,
+        propose_return_rebind,
+    )
+
+    if kind == "frontier_patch":
+        proposal = propose_frontier_patch(
+            manifest,
+            list(content["labels"]),
+            basis_refs=content.get("basis_refs"),
+            replace_range=tuple(content["replace_range"]) if "replace_range" in content else None,
+        )
+    elif kind == "replan_slice":
+        proposal = propose_replan_slice(
+            manifest,
+            new_frontier=list(content["labels"]),
+            contradiction_refs=list(content["contradiction_refs"]),
+            basis_refs=content.get("basis_refs"),
+            replace_range=tuple(content["replace_range"]) if "replace_range" in content else None,
+        )
+    elif kind == "defer":
+        proposal = propose_defer(manifest, content["interest"])
+    elif kind == "return_rebind":
+        proposal = propose_return_rebind(manifest, list(content["invalidate"]))
+    elif kind == "absorb":
+        proposal = propose_absorb(
+            manifest,
+            content["interest_index"],
+            amendment=content.get("amendment"),
+        )
+    else:
+        raise ValueError(f"unknown mission OS test proposal: {kind}")
+    return proposal.to_event_data()
+
+
+def critical_path_clearance(
+    *, reason: str = "Recorded as outside the current completion path.",
+    basis_refs: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "reason": reason,
+        "basis_refs": list(basis_refs or ["authority:instruction"]),
+    }
