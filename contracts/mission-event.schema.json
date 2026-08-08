@@ -1,13 +1,36 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://zms-labs.github.io/practical-agency/contracts/mission-event.schema.json",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/mission-event@1",
   "title": "mission-event@1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "actor_ref"],
+  "required": [
+    "schema",
+    "event_id",
+    "mission_id",
+    "expected_revision",
+    "kind",
+    "actor_ref",
+    "data",
+    "observed_at"
+  ],
   "properties": {
-    "kind": {
+    "schema": {
+      "const": "mission-event@1"
+    },
+    "event_id": {
       "type": "string",
+      "minLength": 1
+    },
+    "mission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
       "enum": [
         "approve",
         "pause",
@@ -24,15 +47,17 @@
         "amend_authority"
       ]
     },
-    "actor_ref": { "type": "string", "minLength": 1 },
-    "detail": { "type": "object" },
-    "artifact_refs": {
-      "type": "array",
-      "items": { "type": "string" }
+    "actor_ref": {
+      "type": "string",
+      "minLength": 1
     },
-    "verdict": {
-      "type": ["string", "null"],
-      "enum": ["PASS", "FAIL", "INCONCLUSIVE", null]
+    "data": {
+      "type": "object",
+      "x-practical-agency-open": true
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }
