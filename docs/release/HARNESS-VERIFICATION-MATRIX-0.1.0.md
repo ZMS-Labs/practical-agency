@@ -3,8 +3,7 @@
 **Purpose:** discharge P2-HARNESS-LOAD with honest tiers. A tier records what was
 actually exercised. It does not upgrade a blocked live check into a pass.
 
-**Subject tip:** record the exact SHA in the observation that freezes the climb
-PR head (see harness-observations/).
+**Subject tip:**  (climb PR head containing this matrix).
 
 ## Tier vocabulary
 

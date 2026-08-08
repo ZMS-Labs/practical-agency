@@ -1,7 +1,7 @@
 # Harness observation — npx skills add (Cursor + Generic Agent Skills)
 
 ```text
-source revision: cb74162f38d679a3320a7842514695d0b11911d0
+source revision: ab5b8b3e2436a67cf8a922419230bf6696537c93
 installed path: /tmp/pa-skills-live/.agents/skills/manifest (probe outside product tree)
 loaded skill count: 1
 loaded skill name: manifest
@@ -38,7 +38,7 @@ date: 2026-08-08
   "manifest_this_intent_in_description": true,
   "observer": "agent:implementer",
   "schema": "practical-agency-harness-observation@1",
-  "source_revision": "cb74162f38d679a3320a7842514695d0b11911d0",
+  "source_revision": "ab5b8b3e2436a67cf8a922419230bf6696537c93",
   "verification_tier": "LIVE"
 }
 ```
