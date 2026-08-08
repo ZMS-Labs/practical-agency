@@ -8,7 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from practical_agency.checkpoint_store import CheckpointError, CheckpointReceipt, FileCheckpointStore, reconcile_observations
+from practical_agency.checkpoint_store import (
+    CheckpointError,
+    CheckpointReceipt,
+    FileCheckpointStore,
+    reconcile_observations,
+    _atomic_write,
+)
 from practical_agency.manifest_model import MissionManifest
 from tests.helpers import clone_payload
 
@@ -141,6 +147,28 @@ class CheckpointStoreTests(unittest.TestCase):
             payload["authority"]["instruction"] = "different"
             with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_REVISION_COLLISION"):
                 store.save(MissionManifest.from_dict(payload))
+
+    def test_old_checkpoint_without_deferred_interests_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = FileCheckpointStore(Path(temp))
+            payload = clone_payload()
+            payload["revision"] = 1
+            del payload["continuity"]["deferred_interests"]
+            data = (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            digest = hashlib.sha256(data).hexdigest()
+            data_path = store._data_path("mission-001", 1)
+            _atomic_write(data_path, data)
+            receipt = CheckpointReceipt(
+                mission_id="mission-001",
+                revision=1,
+                path=str(data_path.resolve()),
+                sha256=digest,
+                created_at="2026-08-07T12:00:00Z",
+            )
+            loaded = store.load(receipt)
+            self.assertEqual(loaded.continuity["deferred_interests"], [])
 
     def test_reconciliation_returns_live_contradiction(self) -> None:
         payload = clone_payload()

@@ -15,6 +15,7 @@ from practical_agency.coordinator import (
     normalize_invocation_intent,
 )
 from practical_agency.manifest_model import MissionManifest
+from practical_agency.state_machine import MissionEvent, apply_event
 from tests.helpers import clone_payload
 
 
@@ -249,6 +250,99 @@ class CoordinatorTests(unittest.TestCase):
                     "artifact_refs": [],
                     "observed_effects": [],
                     "returned_control_point": {"mission_id": "other"},
+                    "coverage_limits": [],
+                },
+            )
+
+    def test_dispatch_blocked_without_applied_frontier_when_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = FileCheckpointStore(Path(temp))
+            active = self.active()
+            decision = coordinate_once(
+                active,
+                execution_request={
+                    "capability_id": "fixture",
+                    "requested_permissions": ["repository:write"],
+                    "requested_effects": ["intended files"],
+                    "estimated_costs": ["one feature branch"],
+                    "action": "write one artifact",
+                },
+                checkpoint_store=store,
+                require_applied_frontier=True,
+            )
+            self.assertEqual(decision.kind, "BLOCK")
+            self.assertIn("MISSION_OS_APPLY_REQUIRED", decision.reason)
+
+    def test_dispatch_allowed_after_frontier_apply_at_current_revision(self) -> None:
+        manifest = apply_event(
+            self.active(),
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {
+                    "proposal_kind": "frontier_patch",
+                    "labels": ["write authorized artifact", "verify receipt"],
+                },
+            ),
+        )
+        decision = coordinate_once(
+            manifest,
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write one artifact",
+            },
+            checkpoint_store=object(),
+            require_applied_frontier=True,
+        )
+        self.assertEqual(decision.kind, "DISPATCH")
+
+    def test_stale_return_point_after_replan_mismatches(self) -> None:
+        manifest = self.active()
+        manifest = MissionManifest.from_dict(
+            {
+                **manifest.to_dict(),
+                "state": {
+                    **manifest.state,
+                    "current_frontier": ["label-a", "step-two"],
+                    "next_action": "label-a",
+                },
+            }
+        )
+        decision = coordinate_once(
+            manifest,
+            unresolved_condition="Bounded question",
+            selected_capability=capability(),
+            frontier_index=0,
+            checkpoint_store=object(),
+        )
+        self.assertEqual(decision.return_point.label, "label-a")
+        replanned = apply_event(
+            manifest,
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {
+                    "proposal_kind": "replan_slice",
+                    "labels": ["label-b", "step-two"],
+                    "contradiction_refs": ["truth:example"],
+                },
+            ),
+        )
+        self.assertEqual(replanned.state["current_frontier"][0], "label-b")
+        with self.assertRaisesRegex(CoordinationError, "RETURN_POINT_MISMATCH"):
+            apply_capability_result(
+                replanned,
+                decision,
+                {
+                    "schema": "capability-result@1",
+                    "request_id": decision.request["request_id"],
+                    "status": "completed",
+                    "artifact_refs": [],
+                    "observed_effects": [],
+                    "returned_control_point": decision.return_point.to_dict(),
                     "coverage_limits": [],
                 },
             )

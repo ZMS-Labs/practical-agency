@@ -191,6 +191,9 @@ class FileCheckpointStore:
             raise CheckpointError(f"CHECKPOINT_INVALID_JSON:{error}") from error
         if not isinstance(payload, dict):
             raise CheckpointError("CHECKPOINT_ROOT_MUST_BE_OBJECT")
+        continuity = payload.setdefault("continuity", {})
+        if isinstance(continuity, dict):
+            continuity.setdefault("deferred_interests", [])
         try:
             manifest = MissionManifest.from_dict(payload)
         except ValueError as error:

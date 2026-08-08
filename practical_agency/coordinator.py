@@ -130,6 +130,19 @@ def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _frontier_apply_present(manifest: MissionManifest) -> bool:
+    rev = manifest.revision
+    for item in manifest.continuity.get("decisions", []):
+        if (
+            isinstance(item, Mapping)
+            and item.get("kind") == "mission-os-apply"
+            and item.get("at_revision") == rev
+            and item.get("proposal_kind") in {"frontier_patch", "replan_slice"}
+        ):
+            return True
+    return False
+
+
 def _pending_remediation_reason(manifest: MissionManifest) -> str | None:
     blockers = manifest.state.get("blockers")
     unresolved = manifest.integrity.get("unresolved_verdicts")
@@ -152,6 +165,7 @@ def coordinate_once(
     frontier_index: int = 0,
     checkpoint_store: object | None = None,
     completion_proposed: bool = False,
+    require_applied_frontier: bool = False,
 ) -> CoordinationDecision:
     if manifest.state.get("status") != MissionStatus.ACTIVE.value:
         return CoordinationDecision(
@@ -234,6 +248,13 @@ def coordinate_once(
         return CoordinationDecision("REQUEST_CAPABILITY", reason, request, point)
 
     if execution_request is not None:
+        if require_applied_frontier and not _frontier_apply_present(manifest):
+            return CoordinationDecision(
+                "BLOCK",
+                "MISSION_OS_APPLY_REQUIRED",
+                None,
+                _return_point(manifest, frontier_index),
+            )
         raw_request = deepcopy(dict(execution_request))
         invalid_field = _valid_execution_input(raw_request)
         if invalid_field is not None:
@@ -356,6 +377,11 @@ def apply_capability_result(
         raise CoordinationError("DECISION_NOT_CAPABILITY_REQUEST")
     if decision.return_point is None:
         raise CoordinationError("RETURN_POINT_REQUIRED")
+    expected_now = _return_point(
+        manifest, decision.return_point.frontier_index
+    )
+    if decision.return_point != expected_now:
+        raise CoordinationError("RETURN_POINT_MISMATCH")
     _validate_capability_result(result, decision)
 
     data = manifest.to_dict()
