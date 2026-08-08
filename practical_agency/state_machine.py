@@ -14,6 +14,9 @@ class TransitionError(RuntimeError):
     """Named refusal for an invalid mission transition."""
 
 
+MISSION_STEWARD_REF = "mission-steward"
+
+
 @dataclass(frozen=True, slots=True)
 class MissionEvent:
     kind: str
@@ -86,6 +89,11 @@ def _string_list(
 def _operator_only(manifest: MissionManifest, event: MissionEvent) -> None:
     if event.actor_ref != manifest.authority.get("operator_ref"):
         raise TransitionError("OPERATOR_AUTHORITY_REQUIRED")
+
+
+def _require_mission_steward(event: MissionEvent) -> None:
+    if event.actor_ref != MISSION_STEWARD_REF:
+        raise TransitionError("MISSION_STEWARD_REQUIRED")
 
 
 def _append_unique(target: list[Any], value: Any) -> None:
@@ -385,6 +393,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         decision_extra: dict[str, Any] = {}
 
         if proposal_kind in ("frontier_patch", "replan_slice"):
+            _require_mission_steward(event)
             labels = _string_list(
                 payload, "labels", "FRONTIER_LABELS_REQUIRED", non_empty=True
             )
@@ -406,6 +415,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 decision_extra["contradiction_refs"] = contradiction_refs
 
         elif proposal_kind == "defer":
+            _require_mission_steward(event)
             interest = payload.get("interest")
             if not isinstance(interest, Mapping):
                 raise TransitionError("DEFERRED_INTEREST_REQUIRED")
@@ -424,6 +434,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             continuity["deferred_interests"].append(copied)
 
         elif proposal_kind == "return_rebind":
+            _require_mission_steward(event)
             invalidate = payload.get("invalidate")
             if not isinstance(invalidate, list) or not invalidate:
                 raise TransitionError("RETURN_REBIND_INVALIDATE_REQUIRED")
@@ -449,6 +460,8 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 if not isinstance(amendment, str) or not amendment.strip():
                     raise TransitionError("HIGH_ABSORB_AMENDMENT_REQUIRED")
                 authority["amendments"].append(amendment.strip())
+            else:
+                _require_mission_steward(event)
             interests[idx] = dict(interest)
             interests[idx]["status"] = "absorbed"
             decision_extra["interest_index"] = idx

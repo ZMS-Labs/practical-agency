@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from practical_agency.deferred_interest import normalize_deferred_interests
 from practical_agency.manifest_model import MissionManifest, MissionStatus
 
 
@@ -193,7 +194,9 @@ class FileCheckpointStore:
             raise CheckpointError("CHECKPOINT_ROOT_MUST_BE_OBJECT")
         continuity = payload.setdefault("continuity", {})
         if isinstance(continuity, dict):
-            continuity.setdefault("deferred_interests", [])
+            continuity["deferred_interests"] = normalize_deferred_interests(
+                continuity.get("deferred_interests")
+            )
         try:
             manifest = MissionManifest.from_dict(payload)
         except ValueError as error:
