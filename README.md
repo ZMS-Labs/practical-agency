@@ -23,8 +23,7 @@ points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
 independent completion, and pinned commission-contract interoperability in
 isolated tests.
 
-There is **no general-purpose shell execution adapter**. A bounded
-filesystem artifact adapter can write allowlisted text artifacts with on-disk
+There is **no general-purpose shell execution adapter**. A bounded filesystem artifact adapter can write allowlisted text artifacts with on-disk
 receipts (`practical_agency.filesystem_artifact`). That is not v1 readiness.
 Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
 (see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
