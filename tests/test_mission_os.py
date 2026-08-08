@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import unittest
+from pathlib import Path
 
 from practical_agency.mission_os import (
     emit_unanswered_condition,
@@ -107,6 +109,13 @@ class MissionOsProposeTests(unittest.TestCase):
                 new_frontier=["repair live drift"],
                 contradiction_refs=[],
             )
+
+    def test_mission_os_source_has_no_inventory_patterns(self) -> None:
+        source = (
+            Path(__file__).parents[1] / "practical_agency" / "mission_os.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("skills/", source)
+        self.assertIsNone(re.search(r"stage[_\s-]*map\s*[:=]", source, re.I))
 
 
 if __name__ == "__main__":

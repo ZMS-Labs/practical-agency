@@ -397,6 +397,7 @@ class CoordinatorTests(unittest.TestCase):
     def test_helix_and_manifest_phrases_normalize_to_same_intent(self) -> None:
         self.assertEqual(normalize_invocation_intent("helix it"), "manifest")
         self.assertEqual(normalize_invocation_intent("manifest this"), "manifest")
+        self.assertEqual(normalize_invocation_intent("carry this through"), "manifest")
 
 
 if __name__ == "__main__":
