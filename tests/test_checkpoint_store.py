@@ -170,6 +170,28 @@ class CheckpointStoreTests(unittest.TestCase):
             loaded = store.load(receipt)
             self.assertEqual(loaded.continuity["deferred_interests"], [])
 
+    def test_checkpoint_with_null_deferred_interests_normalizes_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = FileCheckpointStore(Path(temp))
+            payload = clone_payload()
+            payload["revision"] = 1
+            payload["continuity"]["deferred_interests"] = None
+            data = (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            digest = hashlib.sha256(data).hexdigest()
+            data_path = store._data_path("mission-001", 1)
+            _atomic_write(data_path, data)
+            receipt = CheckpointReceipt(
+                mission_id="mission-001",
+                revision=1,
+                path=str(data_path.resolve()),
+                sha256=digest,
+                created_at="2026-08-07T12:00:00Z",
+            )
+            loaded = store.load(receipt)
+            self.assertEqual(loaded.continuity["deferred_interests"], [])
+
     def test_reconciliation_returns_live_contradiction(self) -> None:
         payload = clone_payload()
         payload["truth"]["verified_facts"] = [{"subject_ref": "artifact:one", "value": "hash-a"}]

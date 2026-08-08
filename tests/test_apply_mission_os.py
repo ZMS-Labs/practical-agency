@@ -151,6 +151,123 @@ class ApplyMissionOsTests(unittest.TestCase):
             "rewrite unrelated files", updated.state["current_frontier"]
         )
 
+    def test_non_steward_cannot_apply_frontier_patch(self) -> None:
+        with self.assertRaisesRegex(TransitionError, "MISSION_STEWARD_REQUIRED"):
+            apply_event(
+                self.active(),
+                MissionEvent(
+                    "apply_mission_os",
+                    "capability:writer",
+                    {
+                        "proposal_kind": "frontier_patch",
+                        "labels": ["write authorized artifact"],
+                    },
+                ),
+            )
+
+    def test_non_steward_cannot_apply_defer(self) -> None:
+        interest = {
+            "schema": "deferred-interest@1",
+            "mission_id": "mission-001",
+            "summary": "explore alternate doc layout",
+            "criticality": "low",
+            "why_not_now": "not required for completion proof",
+            "suggested_next": None,
+            "subject_refs": [],
+            "created_at_revision": 2,
+            "status": "open",
+        }
+        with self.assertRaisesRegex(TransitionError, "MISSION_STEWARD_REQUIRED"):
+            apply_event(
+                self.active(),
+                MissionEvent(
+                    "apply_mission_os",
+                    "operator:test",
+                    {"proposal_kind": "defer", "interest": interest},
+                ),
+            )
+
+    def test_non_steward_cannot_absorb_low_criticality(self) -> None:
+        payload = clone_payload()
+        payload["revision"] = 2
+        payload["state"]["status"] = "active"
+        payload["continuity"]["prior_checkpoint"] = "checkpoint:1"
+        payload["continuity"]["deferred_interests"] = [
+            {
+                "schema": "deferred-interest@1",
+                "mission_id": "mission-001",
+                "summary": "minor follow-up",
+                "criticality": "low",
+                "why_not_now": "not now",
+                "suggested_next": None,
+                "subject_refs": [],
+                "created_at_revision": 2,
+                "status": "open",
+            }
+        ]
+        manifest = MissionManifest.from_dict(payload)
+        with self.assertRaisesRegex(TransitionError, "MISSION_STEWARD_REQUIRED"):
+            apply_event(
+                manifest,
+                MissionEvent(
+                    "apply_mission_os",
+                    "operator:test",
+                    {"proposal_kind": "absorb", "interest_index": 0},
+                ),
+            )
+
+    def test_replan_slice_appends_contradiction_refs(self) -> None:
+        manifest = self.active()
+        updated = apply_event(
+            manifest,
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {
+                    "proposal_kind": "replan_slice",
+                    "labels": ["reconcile truth", "write authorized artifact"],
+                    "contradiction_refs": ["contradiction:layout-a"],
+                },
+            ),
+        )
+        self.assertIn("contradiction:layout-a", updated.truth["contradictions"])
+        decisions = [
+            d
+            for d in updated.continuity["decisions"]
+            if d.get("kind") == "mission-os-apply"
+        ]
+        self.assertEqual(decisions[-1]["proposal_kind"], "replan_slice")
+        self.assertEqual(
+            decisions[-1]["contradiction_refs"], ["contradiction:layout-a"]
+        )
+
+    def test_return_rebind_records_decision_without_changing_frontier(self) -> None:
+        manifest = self.active()
+        frontier_before = list(manifest.state["current_frontier"])
+        updated = apply_event(
+            manifest,
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {
+                    "proposal_kind": "return_rebind",
+                    "invalidate": [{"subject_ref": "artifact:stale", "reason": "superseded"}],
+                },
+            ),
+        )
+        self.assertEqual(updated.state["current_frontier"], frontier_before)
+        decisions = [
+            d
+            for d in updated.continuity["decisions"]
+            if d.get("kind") == "mission-os-apply"
+            and d.get("proposal_kind") == "return_rebind"
+        ]
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(
+            decisions[0]["invalidate"],
+            [{"subject_ref": "artifact:stale", "reason": "superseded"}],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
