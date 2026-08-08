@@ -1,27 +1,45 @@
 {
   "schema": "mission-manifest@1",
-  "mission_id": "mission-watch-disk",
+  "mission_id": "commission-disk-space-alert",
   "revision": 1,
   "authority": {
     "operator_ref": "operator:test",
-    "instruction": "Commission a proven external disk-space alert.",
+    "instruction": "Commission and prove an external disk-space alert without claiming that this session remains active.",
     "amendments": [],
-    "permissions": ["repository:write", "observer:commission"],
-    "protected_state": ["production credentials"],
-    "acceptable_costs": ["one monitoring rule"],
-    "escalation_required_for": ["destructive action"],
+    "permissions": [
+      "repository:write"
+    ],
+    "protected_state": [
+      "unrelated files"
+    ],
+    "acceptable_costs": [
+      "one feature branch"
+    ],
+    "escalation_required_for": [
+      "destructive action"
+    ],
     "revoked": false,
     "revocation_reason": null
   },
   "outcome": {
-    "desired_state": "An external observer is PROVEN for disk-space alerts.",
-    "completion_proof": ["watch-commission PROVEN receipt"],
-    "integrity_guards": ["upstream verifier accepted the commission"],
-    "scope_proof": ["only the named observer mechanism is enabled"],
-    "stop_conditions": ["operator revokes authority"]
+    "desired_state": "A real external observer detects free space below 15 percent and alerts an authorized recipient.",
+    "completion_proof": [
+      "artifact:watch-commission-proven"
+    ],
+    "integrity_guards": [
+      "upstream semantic verifier accepts the commission"
+    ],
+    "scope_proof": [
+      "only the declared fixture subject and adapter are touched"
+    ],
+    "stop_conditions": [
+      "no safe proof crossing exists"
+    ]
   },
   "truth": {
-    "subject_refs": ["observer:disk-space"],
+    "subject_refs": [
+      "subject:example-disk"
+    ],
     "verified_facts": [],
     "assumptions": [],
     "contradictions": [],
@@ -30,9 +48,11 @@
   "state": {
     "status": "draft",
     "completed_actions": [],
-    "current_frontier": ["commission observer"],
+    "current_frontier": [
+      "obtain an external execution substrate"
+    ],
     "blockers": [],
-    "next_action": "commission observer"
+    "next_action": "obtain an external execution substrate"
   },
   "capabilities": {
     "discovered_at": null,
@@ -49,16 +69,40 @@
     "watch_commissions": [
       {
         "schema": "watch-commission@1",
-        "commission_id": "wc-disk-1",
+        "commission_id": "wc-disk-001",
         "state": "BLOCKED",
         "block_reason": "NO_EXECUTION_SUBSTRATE",
         "block_evidence": {
-          "detail": "no scheduler available in this harness",
-          "observed_at": "2026-08-07T00:00:00Z",
-          "receipt_ref": "discovery:none"
+          "detail": "no persistent provider is available in the current harness",
+          "observed_at": "2026-08-07T12:00:00Z",
+          "receipt_ref": "external-discovery://no-substrate/1"
         },
-        "proof": {},
-        "observed_failure": {}
+        "external_observer": {
+          "substrate_kind": null,
+          "substrate": null,
+          "mechanism_ref": null,
+          "persistence_receipt_ref": null,
+          "persistent_outside_session": false,
+          "enabled": false
+        },
+        "kill_switch": {
+          "procedure_ref": null,
+          "exercised": false,
+          "exercise_receipt_ref": null
+        },
+        "proof": {
+          "authorized_by": null,
+          "authorization_ref": null,
+          "safe_crossing": null,
+          "production_path": false,
+          "bound_crossed": false,
+          "alert_received": false,
+          "received_at": null,
+          "alert_receipt_ref": null
+        },
+        "coverage_limits": [
+          "no production observer has been commissioned"
+        ]
       }
     ]
   },
@@ -66,6 +110,6 @@
     "actor_may_self_accept": false,
     "required_gates": [],
     "unresolved_verdicts": [],
-    "completion_acceptor": "acceptor:independent"
+    "completion_acceptor": null
   }
 }

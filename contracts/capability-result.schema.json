@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://zms-labs.github.io/practical-agency/contracts/capability-result.schema.json",
+  "$id": "https://github.com/ZMS-Labs/practical-agency/contracts/capability-result@1",
   "title": "capability-result@1",
   "type": "object",
   "additionalProperties": false,
@@ -14,15 +14,72 @@
     "coverage_limits"
   ],
   "properties": {
-    "schema": { "const": "capability-result@1" },
-    "request_id": { "type": "string", "minLength": 1 },
-    "status": {
-      "type": "string",
-      "enum": ["completed", "declined", "blocked", "failed"]
+    "schema": {
+      "const": "capability-result@1"
     },
-    "artifact_refs": { "type": "array", "items": { "type": "string" } },
-    "observed_effects": { "type": "array", "items": { "type": "string" } },
-    "returned_control_point": { "type": "object" },
-    "coverage_limits": { "type": "array", "items": { "type": "string" } }
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "declined",
+        "blocked",
+        "failed"
+      ]
+    },
+    "verdict": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "observed_effects": {
+      "type": "array",
+      "items": {}
+    },
+    "returned_control_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mission_id",
+        "revision",
+        "frontier_index",
+        "label"
+      ],
+      "properties": {
+        "mission_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frontier_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "coverage_limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
   }
 }

@@ -1,102 +1,51 @@
-# Mission manifest — field guide (v0)
+# Mission manifest — `mission-manifest@1`
 
-The **mission manifest** is the durable artifact for [Practical Agency](https://github.com/ZMS-Labs/practical-agency). It binds **bounded delegated agency**: what a mission steward may do, where evidence goes, and when work must stop.
+The mission manifest is Practical Agency's canonical durable artifact. JSON is
+the authoritative representation in v0.1; Markdown summaries are projections and
+cannot replace a validated checkpoint.
 
-## Where it lives
+## Required sections
 
-Choose one authoritative path per mission and record it in the manifest header:
-
-- **Repo mission** — `docs/missions/<mission-id>.md` or `.missions/<mission-id>.md`
-- **Project mission** — `MISSION.md` at the project root (single active mission only)
-- **Fleet mission** — path declared in the controlling repo's governance docs
-
-Never fork the manifest across two locations. Link from chat; do not duplicate authority.
-
-## Template
-
-Copy and fill:
-
-```markdown
----
-mission_id: <kebab-case-id>
-status: draft | active | hold | complete | cancelled
-sovereign: <name or role>
-steward: <agent or team>
-opened: <ISO-8601 date>
-updated: <ISO-8601 date>
----
-
-# Mission: <short title>
-
-## Intent
-
-<What the sovereign wants — outcome, not task list.>
-
-## Scope
-
-### In
-
-- …
-
-### Out
-
-- …
-
-### Environments
-
-- …
-
-## Authorization
-
-| Class | Steward may | Requires re-approval |
-| --- | --- | --- |
-| Read / observe | … | … |
-| Reversible local edit | … | … |
-| Consequential / irreversible | … | always |
-
-## Evidence
-
-| Claim | Oracle / location |
+| Section | Purpose |
 | --- | --- |
-| Progress | … |
-| Completion | … |
+| `authority` | Operator identity, verbatim instruction, append-only amendments, permissions, protected state, cost, escalation, revocation |
+| `outcome` | Desired state, completion proof, integrity guards, scope proof, stop conditions |
+| `truth` | Revision-bound subjects, verified facts, assumptions, contradictions, unknowns |
+| `state` | Closed mission status, completed actions, frontier, blockers, next action |
+| `capabilities` | Discovery time and available, invoked, unavailable, degraded capabilities |
+| `continuity` | Prior checkpoint, artifacts, decisions, external handoffs, watch commissions, deferred interests |
+| `integrity` | Self-acceptance prohibition, gates, unresolved verdicts, independent acceptor |
 
-## Stop and hold
+The complete structural carrier is
+[`contracts/mission-manifest.schema.json`](../contracts/mission-manifest.schema.json).
+Cross-field semantic rules are enforced by
+`practical_agency.validation.validate_manifest_dict`.
 
-- **Hold if:** …
-- **Stop if:** …
-- **Escalate if:** …
+## Lifecycle
 
-## Log
-
-Reverse-chronological notes; material decisions only.
-
-- <date> — …
+```text
+draft -> active -> paused -> active
+active|paused|verifying -> blocked -> active
+active -> verifying -> completed
+verifying -> active|blocked on FAIL or INCONCLUSIVE
+nonterminal -> cancelled on revocation/cancellation
 ```
 
-## Status semantics
+No caller can assign status directly through the transition API.
 
-| Status | Meaning |
-| --- | --- |
-| `draft` | Manifest under construction; no consequential execution. |
-| `active` | Steward may execute within authorization. |
-| `hold` | Blocked; steward must not expand scope until cleared. |
-| `complete` | Outcome accepted or explicitly abandoned with record. |
-| `cancelled` | Sovereign withdrew mission; no further execution. |
+## Checkpoints
 
-## Completion block
+A checkpoint stores canonical JSON bytes and a separate SHA-256 receipt. Revision
+files are immutable: the same mission/revision cannot be overwritten with
+different bytes. A prose summary, stale chat, or partial temporary file is not a
+checkpoint.
 
-When closing, append:
+On resumption, load the highest valid receipt, verify its bytes, then compare
+stored verified facts with live observations. Contradictions and missing live
+observations reopen dependent work.
 
-```markdown
-## Completion
+## Example
 
-- **Result:** …
-- **Evidence:** …
-- **Not done:** …
-- **Follow-ups:** …
-```
-
-## Versioning
-
-Bump `updated` on every material edit. For long missions, consider git tags or manifest filename versioning (`mission-id-v2.md`) instead of silent overwrite.
+Start from [`examples/minimal-mission.json`](../examples/minimal-mission.json).
+Preserve `authority.instruction` byte-for-byte. Use `authority.amendments` for
+later operator changes rather than editing the original instruction.
