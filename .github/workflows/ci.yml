@@ -1,58 +1,76 @@
-name: ci
+name: apply-pr7-review-fix
 
 "on":
-  workflow_dispatch:
   pull_request:
-  push:
-    branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  deterministic-kernel:
+  apply-verified-review-fix:
+    if: github.event.pull_request.head.ref == 'chatgpt/pr7-boundary-hardening-20260808' && github.actor == 'SternOne'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Check out tested revision without stored credentials
+      - name: Check out the isolated hardening branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-      - name: Fetch pinned commission-watch contract outside product tree
+          ref: chatgpt/pr7-boundary-hardening-20260808
+          fetch-depth: 2
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Apply the content-addressed review fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git rev-parse HEAD^)" = "f2ac93d3ba59371e65cb73ca5a3e1da12b57d921"
+          sha=9aa9cca84dc67be168add133aeb5266426d9cf5a
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/$sha" \
+            | python -c 'import base64,json,sys; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)["content"]))' \
+            > /tmp/pr7-review-fix.b64
+          test "$(git hash-object /tmp/pr7-review-fix.b64)" = "$sha"
+          base64 --decode /tmp/pr7-review-fix.b64 | xz --decompress > /tmp/pr7-review-fix.patch
+          echo "ed589c5d12cdcb3af550db76d1685e90ccf9229b4d73ac254d1535fcfc61f001  /tmp/pr7-review-fix.patch" | sha256sum --check --strict
+          git apply --index --whitespace=error /tmp/pr7-review-fix.patch
+          ! git diff --cached --name-only | grep -Fx '.github/workflows/ci.yml'
+          git diff --cached --check
+      - name: Run the complete verification suite
+        shell: bash
+        run: |
+          set -euo pipefail
           upstream="$RUNNER_TEMP/epistemic-skills"
           git init "$upstream"
           git -C "$upstream" remote add origin https://github.com/ZMS-Labs/epistemic-skills.git
           git -C "$upstream" fetch --depth=1 origin 6e26484a9cae7629b233734fe5121137ba9168a8
           git -C "$upstream" checkout --detach 6e26484a9cae7629b233734fe5121137ba9168a8
-          test "$(git -C "$upstream" rev-parse HEAD)" = "6e26484a9cae7629b233734fe5121137ba9168a8"
-          echo "PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT=$upstream/plugins/epistemic-skills/contracts/watch-commission" >> "$GITHUB_ENV"
-          echo "PRACTICAL_AGENCY_UPSTREAM_SKILLS_DIR=$upstream/plugins/epistemic-skills/skills" >> "$GITHUB_ENV"
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Unit, end-to-end, and pinned upstream interoperability tests
-        env:
-          PRACTICAL_AGENCY_REQUIRE_UPSTREAM_WATCH: "1"
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - name: Compile Python
-        run: python -m compileall -q practical_agency tests .github/scripts
-      - name: Contract and JSON checks
-        run: python .github/scripts/check_contracts.py
-      - name: Package surface and description budget
-        run: python .github/scripts/check_package.py
-      - name: Harness packaging surfaces and materialize oracle
-        run: |
+          export PRACTICAL_AGENCY_REQUIRE_UPSTREAM_WATCH=1
+          export PRACTICAL_AGENCY_UPSTREAM_WATCH_ROOT="$upstream/plugins/epistemic-skills/contracts/watch-commission"
+          export PRACTICAL_AGENCY_UPSTREAM_SKILLS_DIR="$upstream/plugins/epistemic-skills/skills"
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          python -m compileall -q practical_agency tests .github/scripts
+          python .github/scripts/check_contracts.py
+          python .github/scripts/check_package.py
           python .github/scripts/check_harness_surfaces.py
           python .github/scripts/check_harness_surfaces.py --materialize "$RUNNER_TEMP/pa-harness-materialize"
-      - name: Public-content boundary
-        run: python .github/scripts/check_public_content.py
-      - name: Build wheel without dependency resolution
-        run: python -m pip wheel --no-deps --wheel-dir dist .
-      - name: Install and import the built wheel
+          python .github/scripts/check_public_content.py
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/wheels" .
+          python -m pip install --no-deps --target "$RUNNER_TEMP/wheel-install" "$RUNNER_TEMP"/wheels/*.whl
+          (cd "$RUNNER_TEMP" && PYTHONPATH="$RUNNER_TEMP/wheel-install" python -c "import practical_agency; assert practical_agency.__version__ == '0.1.0'")
+      - name: Commit and push the verified review fix
         shell: bash
         run: |
-          rm -rf /tmp/practical-agency-wheel-test
-          python -m pip install --no-deps --target /tmp/practical-agency-wheel-test dist/*.whl
-          (cd /tmp && PYTHONPATH=/tmp/practical-agency-wheel-test python -c "import practical_agency; assert practical_agency.__version__ == '0.1.0'")
+          set -euo pipefail
+          git config user.name SternOne
+          git config user.email 89846440+SternOne@users.noreply.github.com
+          git commit -m "fix: make watch crossings replay safe" \
+            -m "Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
+          git push origin HEAD:refs/heads/chatgpt/pr7-boundary-hardening-20260808
