@@ -691,27 +691,30 @@ Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>"
   - `coordinate_once(..., require_mission_os_apply: bool = False)` OR simpler rule:
 
 **Dispatch gate (slice rule):**  
-If `execution_request` is present and the caller passes `mission_os_bound=True`, require a `continuity.decisions` entry with `kind == "mission-os-apply"` at `manifest.revision` matching current frontier.  
+If `execution_request` is present and the caller passes `require_applied_frontier=True`, require that a frontier/replan was **applied** earlier on this mission. Defer (and other non-frontier applies) bump revision and must **not** invalidate that custody.
 
-Even simpler deterministic rule for the slice:
+Deterministic rule (amended after first-slice integration — design path is frontier apply → optional defer → dispatch):
 
 ```python
 def _frontier_apply_present(manifest) -> bool:
     rev = manifest.revision
+    latest: int | None = None
     for item in manifest.continuity.get("decisions", []):
-        if (
-            isinstance(item, Mapping)
-            and item.get("kind") == "mission-os-apply"
-            and item.get("at_revision") == rev
-            and item.get("proposal_kind") in {"frontier_patch", "replan_slice"}
-        ):
-            return True
-    return False
+        if not isinstance(item, Mapping) or item.get("kind") != "mission-os-apply":
+            continue
+        if item.get("proposal_kind") not in {"frontier_patch", "replan_slice"}:
+            continue
+        at_revision = item.get("at_revision")
+        if isinstance(at_revision, int) and (latest is None or at_revision > latest):
+            latest = at_revision
+    return latest is not None and latest <= rev
 ```
 
 When `coordinate_once(..., require_applied_frontier=True)` and execution_request set, BLOCK with `MISSION_OS_APPLY_REQUIRED` unless `_frontier_apply_present`.
 
 Default `require_applied_frontier=False` to avoid breaking existing tests; mission-os slice and new tests set True.
+
+Also cover: frontier apply then defer still allows dispatch when `require_applied_frontier=True`.
 
 Return-point: add test that after `apply_mission_os` replan changes label at index 0, `apply_capability_result` with old return_point raises `RETURN_POINT_MISMATCH`.
 

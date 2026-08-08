@@ -299,6 +299,53 @@ class CoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(decision.kind, "DISPATCH")
 
+    def test_dispatch_allowed_after_frontier_apply_then_defer(self) -> None:
+        """Defer bumps revision; prior frontier apply still satisfies the gate."""
+        manifest = apply_event(
+            self.active(),
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {
+                    "proposal_kind": "frontier_patch",
+                    "labels": ["write authorized artifact"],
+                },
+            ),
+        )
+        interest = {
+            "schema": "deferred-interest@1",
+            "mission_id": "mission-001",
+            "summary": "optional docs polish",
+            "criticality": "low",
+            "why_not_now": "not required for completion proof",
+            "suggested_next": None,
+            "subject_refs": [],
+            "created_at_revision": manifest.revision,
+            "status": "open",
+        }
+        after_defer = apply_event(
+            manifest,
+            MissionEvent(
+                "apply_mission_os",
+                "mission-steward",
+                {"proposal_kind": "defer", "interest": interest},
+            ),
+        )
+        self.assertGreater(after_defer.revision, manifest.revision)
+        decision = coordinate_once(
+            after_defer,
+            execution_request={
+                "capability_id": "fixture",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": ["intended files"],
+                "estimated_costs": ["one feature branch"],
+                "action": "write one artifact",
+            },
+            checkpoint_store=object(),
+            require_applied_frontier=True,
+        )
+        self.assertEqual(decision.kind, "DISPATCH")
+
     def test_stale_return_point_after_replan_mismatches(self) -> None:
         manifest = self.active()
         manifest = MissionManifest.from_dict(
