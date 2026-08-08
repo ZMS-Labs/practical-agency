@@ -23,12 +23,15 @@ points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
 independent completion, and pinned commission-contract interoperability in
 isolated tests.
 
-There is **no production external execution adapter** in v0.1.
+There is **no general-purpose shell execution adapter**. A bounded
+filesystem artifact adapter can write allowlisted text artifacts with on-disk
+receipts (`practical_agency.filesystem_artifact`). That is not v1 readiness.
 Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
 (see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
 Customize→Skills panel and Claude live load remain unverified.
 comparative benefit over an ordinary capable agent is also unestablished
-until a controlled evaluation exists.
+until a controlled evaluation exists. Operator direction: defer `0.1.0` tag
+ceremony; invest in teeth toward v1.
 
 `1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
 authorized intent installable in a declared harness, advanced through at least

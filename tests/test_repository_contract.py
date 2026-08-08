@@ -57,10 +57,12 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertTrue(text.startswith(expected))
         for phrase in (
             "not a daemon",
-            "no production external execution adapter",
+            "no general-purpose shell execution adapter",
+            "bounded filesystem artifact adapter",
             "Cursor/Generic Agent Skills install inventory is LIVE",
             "Customize→Skills panel and Claude live load remain unverified",
             "comparative benefit",
+            "invest in teeth toward v1",
         ):
             self.assertIn(phrase, text)
 

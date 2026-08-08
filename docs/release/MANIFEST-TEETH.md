@@ -49,8 +49,10 @@ Missing substrate becomes visible `BLOCKED`, not silent prose success.
 **Falsifier:** “mission complete” with only narrative artifacts for a claim that
 required an external effect.
 
-This is the gap between tagged **`0.1.0`** (custody kernel) and **`1.0.0`**
-(first operator-useful major). See [VERSIONING.md](VERSIONING.md).
+This is the gap between a custody kernel and **`1.0.0` / v1** (first
+operator-useful major). A bounded filesystem artifact adapter is an early world
+path; it is not by itself v1. Operator direction (2026-08-08): defer `0.1.0` tag
+ceremony and keep building teeth. See [VERSIONING.md](VERSIONING.md).
 
 ### 4. Proof power — the worker cannot bless the work
 

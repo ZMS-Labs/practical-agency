@@ -1,26 +1,28 @@
 # Frontier — climb-pa-0-1
 
-Mission status: **active** (see `mission.json` revision)
+Mission status: **active** (see `mission.json`)
 
-## Completed this step
+## Operator direction (2026-08-08)
 
-- Harness surface oracle + CI (`check_harness_surfaces.py`)
-- `LIVE` install-inventory for Cursor + Generic Agent Skills via `npx skills add`
-- Matrix: `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`
-- **P2-HARNESS-LOAD** closed for install-inventory scope (panel/Claude still blocked)
+- Waived immediate `0.1.0` tag/release review and residual LIVE_BLOCKED gaps.
+- No release needed yet. **v1 is the release that matters.**
+- Pivot: build worth — bounded receipted world effects under authority.
 
-## Metacognate pairing
+## Completed recently
 
-- Superpowers TDD delivered the oracle (RED→GREEN).
-- Metacognate forbids calling panel-unseen load a full GUI proof; limits recorded.
-- Manifest keeps one frontier: independent **release** accept before tag.
+- Teeth definition (`MANIFEST-TEETH.md`)
+- LIVE install-inventory harness oracle (Cursor/Generic Agent Skills)
+- Operator waiver deferring release ceremony
+- Bounded `filesystem-artifact@1` adapter with on-disk external receipts
 
-## Next action
+## Next actions
 
-1. close-or-waive-P2-INDEPENDENT-ACCEPT (steward must not self-accept)
+1. Prove adapter usefulness in a realistic mission path (more than unit e2e)
+2. Keep declining tag/v1 claims until teeth feel worth the investment
+3. Later: independent review when you want a support point tagged
 
 ## Explicit non-claims
 
 - Not a tag certificate
-- Not v1.0 / world-adapter teeth
-- Not Claude live load
+- Not v1 readiness
+- Not a shell executor / daemon / monitor

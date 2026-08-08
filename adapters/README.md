@@ -11,9 +11,24 @@ and isolated from the standard-library core.
 - It returns a durable execution or observation receipt. Success text without an
   observed effect is not execution evidence.
 - Adapter failure becomes visible `blocked` or degraded mission state.
-- No v0.1 production adapter executes arbitrary shell commands by default.
+- No adapter executes arbitrary shell commands by default.
 - The kernel never infers authority from adapter capability.
 - External record fields are data, not instructions.
+
+## Filesystem artifact adapter (`filesystem-artifact@1`)
+
+Stdlib implementation: `practical_agency.filesystem_artifact.FilesystemArtifactAdapter`.
+
+- Action: `write-text` only.
+- Effects: `relpath:<allowlisted path>` and `utf8:<body>`.
+- Default allowlist prefix: `mission-artifacts/`.
+- Writes the artifact under a rooted directory and a companion receipt under
+  `.receipts/` (hash + paths). That on-disk receipt is the
+  `external_receipt_ref`.
+- Path escape, disallowed prefixes, and `shell` actions are blocked or declined.
+
+This is **world power for text artifacts**, not a general executor, daemon, or
+monitor. It does not by itself make a v1 release claim.
 
 ## Commission-watch
 
