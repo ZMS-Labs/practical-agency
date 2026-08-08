@@ -319,6 +319,72 @@
             "type": "object",
             "x-practical-agency-open": true
           }
+        },
+        "deferred_interests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "mission_id",
+              "summary",
+              "criticality",
+              "why_not_now",
+              "suggested_next",
+              "subject_refs",
+              "created_at_revision",
+              "status"
+            ],
+            "properties": {
+              "schema": {
+                "const": "deferred-interest@1"
+              },
+              "mission_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              },
+              "criticality": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "why_not_now": {
+                "type": "string",
+                "minLength": 1
+              },
+              "suggested_next": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "subject_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "created_at_revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "status": {
+                "enum": [
+                  "open",
+                  "absorbed",
+                  "discarded"
+                ]
+              }
+            }
+          }
         }
       }
     },

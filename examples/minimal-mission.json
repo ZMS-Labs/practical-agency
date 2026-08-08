@@ -66,7 +66,8 @@
     "durable_artifacts": [],
     "decisions": [],
     "external_handoffs": [],
-    "watch_commissions": []
+    "watch_commissions": [],
+    "deferred_interests": []
   },
   "integrity": {
     "actor_may_self_accept": false,

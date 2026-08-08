@@ -19,6 +19,7 @@ class RepositoryContractTests(unittest.TestCase):
             "execution-receipt.schema.json",
             "capability-request.schema.json",
             "capability-result.schema.json",
+            "deferred-interest.schema.json",
         }
         self.assertEqual({path.name for path in (ROOT / "contracts").glob("*.json")}, required)
         for path in sorted((ROOT / "contracts").glob("*.json")):

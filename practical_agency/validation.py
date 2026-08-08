@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from practical_agency.deferred_interest import validate_deferred_interest
 from practical_agency.manifest_model import MissionStatus
 
 MISSION_ID_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -76,6 +77,10 @@ OBJECT_KEYS: dict[str, set[str]] = {
     },
 }
 
+OPTIONAL_OBJECT_FIELDS: dict[str, set[str]] = {
+    "continuity": {"deferred_interests"},
+}
+
 LIST_FIELDS: dict[str, set[str]] = {
     "authority": {
         "amendments",
@@ -104,6 +109,7 @@ LIST_FIELDS: dict[str, set[str]] = {
         "decisions",
         "external_handoffs",
         "watch_commissions",
+        "deferred_interests",
     },
     "integrity": {"required_gates", "unresolved_verdicts"},
 }
@@ -163,7 +169,8 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
             errors.append(f"INVALID_OBJECT: {name} must be an object")
             continue
         governed[name] = value
-        _unknown_keys(errors, name, value, allowed)
+        allowed_keys = allowed | OPTIONAL_OBJECT_FIELDS.get(name, set())
+        _unknown_keys(errors, name, value, allowed_keys)
         for required in sorted(allowed - set(value)):
             errors.append(f"MISSING_FIELD: {name}.{required} is required")
         for field in LIST_FIELDS.get(name, set()):
@@ -267,6 +274,17 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
             errors.append(
                 f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
             )
+
+    deferred_interests = continuity.get("deferred_interests")
+    if deferred_interests is not None:
+        if not isinstance(deferred_interests, list):
+            pass
+        elif isinstance(mission_id, str) and mission_id.strip():
+            for index, item in enumerate(deferred_interests):
+                for error in validate_deferred_interest(item, mission_id=mission_id):
+                    errors.append(
+                        f"DEFERRED_INTEREST: continuity.deferred_interests[{index}]: {error}"
+                    )
 
     for field in ("required_gates", "unresolved_verdicts"):
         if not _all_nonempty_strings(integrity.get(field)):

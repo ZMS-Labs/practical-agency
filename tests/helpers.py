@@ -54,6 +54,7 @@ def minimal_payload() -> dict[str, Any]:
             "decisions": [],
             "external_handoffs": [],
             "watch_commissions": [],
+            "deferred_interests": [],
         },
         "integrity": {
             "actor_may_self_accept": False,

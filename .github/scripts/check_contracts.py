@@ -20,6 +20,7 @@ REQUIRED_SCHEMAS = {
     "execution-receipt.schema.json",
     "capability-request.schema.json",
     "capability-result.schema.json",
+    "deferred-interest.schema.json",
 }
 
 
