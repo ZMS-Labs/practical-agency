@@ -30,8 +30,9 @@ public **`manifest`** skill. It does **not** add a second public skill and does
 “helix it” is legacy synonym only and must never gain special behavior.
 
 A manual-degraded gauntlet on the brainstorming draft returned **NO-GO** until
-the P1 hardening below landed in this document. Implementation remains blocked
-until the operator accepts this amended revision.
+the P1 hardening below landed in this document. The operator accepted this
+amended revision on 2026-08-08; implementation follows the bound plan (not this
+prose alone).
 
 ## Goals
 
@@ -309,4 +310,6 @@ Authoring-session checklist alone is not acceptance.
 | Metacognate | Fired — design approval is high-blast / architecture commit |
 | Gauntlet | `docs/gauntlet-runs/mission-os-v1-design-2026-08-08/` |
 | Unamended verdict | **NO-GO** |
-| This document | P1 amendments applied; operator accept still required |
+| Amended tip | `ec7f95f` — P1 amendments applied |
+| Operator accept | 2026-08-08 — yes (amended design) |
+| Implementation plan | `docs/superpowers/plans/2026-08-08-mission-os-first-slice.md` |
