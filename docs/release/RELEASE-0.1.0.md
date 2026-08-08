@@ -7,6 +7,15 @@ Tagging `0.1.0` does **not** satisfy
 [RELEASE-1.0.0-CRITERIA.md](RELEASE-1.0.0-CRITERIA.md). See
 [VERSIONING.md](VERSIONING.md) for the claim-surface ladder.
 
+Climb tip under review: branch `cursor/climb-0-1-a955` (hardened PR #4 kernel plus
+versioning docs).  
+Prior `main@57f37ce` freeze: CONDITIONAL —
+[`../gauntlet-runs/practical-agency-0.1.0-candidate-2026-08-07/`](../gauntlet-runs/practical-agency-0.1.0-candidate-2026-08-07/).  
+Climb reconcile:
+[`../gauntlet-runs/practical-agency-0.1.0-climb-2026-08-08/RECONCILE.md`](../gauntlet-runs/practical-agency-0.1.0-climb-2026-08-08/RECONCILE.md).  
+Verification:
+[`VERIFICATION-0.1.0-climb-tip.md`](VERIFICATION-0.1.0-climb-tip.md).
+
 ## Proven by deterministic fixtures
 
 - strict mission-manifest validation and canonical round trips;
@@ -58,6 +67,14 @@ automatic `watch` → `manifest` route has been admitted.
   inventory;
 - all committed JSON files parse; and
 - schemas, package boundaries, public-content checks, and Python compilation pass.
+
+## Harness evidence so far
+
+- Cursor cloud workspace: `structural-archive-only` —
+  [`harness-observations/cursor-cloud-2026-08-08.md`](harness-observations/cursor-cloud-2026-08-08.md).
+  Does **not** close P2-HARNESS-LOAD.
+- Checklist template:
+  [`HARNESS-LOAD-CHECKLIST-0.1.0.md`](HARNESS-LOAD-CHECKLIST-0.1.0.md).
 
 ## Unverified until separately exercised
 
