@@ -363,6 +363,9 @@ class CoordinatorTests(unittest.TestCase):
                 {"labels": ["label-a", "step-two"]},
             ),
         )
+        payload = manifest.to_dict()
+        payload["truth"]["contradictions"] = ["contradiction:frontier-replan"]
+        manifest = MissionManifest.from_dict(payload)
         decision = coordinate_once(
             manifest,
             unresolved_condition="Bounded question",
@@ -373,7 +376,7 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(decision.return_point.label, "label-a")
         replanned = apply_event_data(
             manifest,
-            "apply_mission_os", "mission-steward", mission_os_event(manifest, "replan_slice", {"labels": ["label-b", "step-two"], "contradiction_refs": ["repo:example@rev-1"]}),
+            "apply_mission_os", "mission-steward", mission_os_event(manifest, "replan_slice", {"labels": ["label-b", "step-two"], "contradiction_refs": ["contradiction:frontier-replan"]}),
         )
         self.assertEqual(replanned.state["current_frontier"][0], "label-b")
         with self.assertRaisesRegex(CoordinationError, "RETURN_POINT_MISMATCH"):
