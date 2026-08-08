@@ -1,31 +1,26 @@
 # Frontier — climb-pa-0-1
 
-Mission status: **active** revision 4  
-Checkpoint: `missions/climb-pa-0-1/checkpoints/climb-pa-0-1.r00000004.json`
+Mission status: **active** (see `mission.json` revision)
 
-## Operator approval
+## Completed this step
 
-- Approved by `operator:zach-stern` (chat, 2026-08-08).
-- Amendment: reach a point where `manifest` has **real teeth** (not reducible to
-  goal/todo/ordinary agent). Definition:
-  [`docs/release/MANIFEST-TEETH.md`](../../docs/release/MANIFEST-TEETH.md).
+- Harness surface oracle + CI (`check_harness_surfaces.py`)
+- `LIVE` install-inventory for Cursor + Generic Agent Skills via `npx skills add`
+- Matrix: `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`
+- **P2-HARNESS-LOAD** closed for install-inventory scope (panel/Claude still blocked)
 
-## Metacognate
+## Metacognate pairing
 
-- Unanswerable for *field* teeth: live harness fire, independent release accept,
-  one receipted adapter path, and whether operators will actually invoke it.
-- Definition of teeth is answerable now → this revision’s work.
-- Still do **not** jump to claiming `1.0.0` or tagging `0.1.0` without P2 close
-  or waiver.
+- Superpowers TDD delivered the oracle (RED→GREEN).
+- Metacognate forbids calling panel-unseen load a full GUI proof; limits recorded.
+- Manifest keeps one frontier: independent **release** accept before tag.
 
-## Next actions (one at a time)
+## Next action
 
-1. ~~define-what-manifest-teeth-means~~ (in progress → record artifact)
-2. close-or-waive-P2-HARNESS-LOAD
-3. close-or-waive-P2-INDEPENDENT-ACCEPT
+1. close-or-waive-P2-INDEPENDENT-ACCEPT (steward must not self-accept)
 
 ## Explicit non-claims
 
-- Teeth definition ≠ teeth demonstrated
 - Not a tag certificate
-- Not v1.0 readiness
+- Not v1.0 / world-adapter teeth
+- Not Claude live load

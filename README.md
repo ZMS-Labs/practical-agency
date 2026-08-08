@@ -23,10 +23,12 @@ points, crash recovery, fail-closed live-state reconciliation, evidence-bearing
 independent completion, and pinned commission-contract interoperability in
 isolated tests.
 
-There is **no production external execution adapter** in v0.1; live harness loading remains unverified
-until each packaging surface is exercised against its exact installed revision;
-comparative benefit over an ordinary capable agent is also unestablished until a
-controlled evaluation exists.
+There is **no production external execution adapter** in v0.1.
+Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
+(see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`); Customize→Skills
+panel and Claude live load remain unverified. Comparative benefit over an
+ordinary capable agent is also unestablished until a controlled evaluation
+exists.
 
 `1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
 authorized intent installable in a declared harness, advanced through at least
@@ -92,6 +94,7 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 python -m compileall -q practical_agency tests .github/scripts
 python .github/scripts/check_contracts.py
 python .github/scripts/check_package.py
+python .github/scripts/check_harness_surfaces.py
 python .github/scripts/check_public_content.py
 ```
 

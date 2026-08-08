@@ -70,11 +70,18 @@ automatic `watch` → `manifest` route has been admitted.
 
 ## Harness evidence so far
 
-- Cursor cloud workspace: `structural-archive-only` —
+- Matrix:
+  [`HARNESS-VERIFICATION-MATRIX-0.1.0.md`](HARNESS-VERIFICATION-MATRIX-0.1.0.md).
+- Cursor + Generic Agent Skills install inventory: `LIVE` —
+  [`harness-observations/agent-skills-npx-2026-08-08.md`](harness-observations/agent-skills-npx-2026-08-08.md)
+  (byte-exact one-skill `manifest` via `npx skills add`; Customize→Skills panel
+  dump still `LIVE_BLOCKED_EXTERNAL`).
+- Cursor cloud workspace earlier: `structural-archive-only` —
   [`harness-observations/cursor-cloud-2026-08-08.md`](harness-observations/cursor-cloud-2026-08-08.md).
-  Does **not** close P2-HARNESS-LOAD.
+- Claude: `DETERMINISTIC` + `LIVE_BLOCKED_EXTERNAL` (plugin metadata only).
 - Checklist template:
   [`HARNESS-LOAD-CHECKLIST-0.1.0.md`](HARNESS-LOAD-CHECKLIST-0.1.0.md).
+- Deterministic oracle: `.github/scripts/check_harness_surfaces.py`.
 
 ## Unverified until separately exercised
 

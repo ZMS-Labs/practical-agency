@@ -28,11 +28,13 @@ self-acceptance and tagging without operator escalation.
 release P2-HARNESS-LOAD, does **not** authorize tag, and is **not** v1.0
 readiness.
 
-## Open P2 (unchanged truth values)
+## P2 status after harness implement step
 
-1. **P2-HARNESS-LOAD** — still open. Cursor cloud observation at
-   [`docs/release/harness-observations/cursor-cloud-2026-08-08.md`](../../release/harness-observations/cursor-cloud-2026-08-08.md)
-   is `structural-archive-only`.
+1. **P2-HARNESS-LOAD** — **closed for install-inventory scope** on Cursor +
+   Generic Agent Skills (`LIVE` via `npx skills add` + materialize oracle). Claude
+   remains `LIVE_BLOCKED_EXTERNAL`. Customize→Skills panel dump remains
+   `LIVE_BLOCKED_EXTERNAL`. See
+   [`HARNESS-VERIFICATION-MATRIX-0.1.0.md`](../../release/HARNESS-VERIFICATION-MATRIX-0.1.0.md).
 2. **P2-INDEPENDENT-ACCEPT** — still open for **release** scope. Kernel-candidate
    PASS exists; release/tag acceptor has not ruled on the climb tip.
 3. **P2-PROD-ADAPTER** — not required to tag `0.1.0` while release notes keep
@@ -40,8 +42,9 @@ readiness.
 
 ## Verdict (authoring; not independent)
 
-**CONDITIONAL** — tag remains blocked. Climbing the ladder means closing the open
-P2s on this tip, not inventing a `1.0.0` claim.
+**CONDITIONAL** — tag remains blocked on **P2-INDEPENDENT-ACCEPT** (and any owner
+judgment about residual `LIVE_BLOCKED_EXTERNAL` panel/Claude rows). Steward must
+not self-accept the release.
 
 ## Mission
 

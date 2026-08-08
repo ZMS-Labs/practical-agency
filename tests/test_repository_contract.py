@@ -58,7 +58,8 @@ class RepositoryContractTests(unittest.TestCase):
         for phrase in (
             "not a daemon",
             "no production external execution adapter",
-            "live harness loading remains unverified",
+            "Cursor/Generic Agent Skills install inventory is LIVE",
+            "Customize→Skills panel and Claude live load remain unverified",
             "comparative benefit",
         ):
             self.assertIn(phrase, text)

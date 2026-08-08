@@ -41,6 +41,10 @@ jobs:
         run: python .github/scripts/check_contracts.py
       - name: Package surface and description budget
         run: python .github/scripts/check_package.py
+      - name: Harness packaging surfaces and materialize oracle
+        run: |
+          python .github/scripts/check_harness_surfaces.py
+          python .github/scripts/check_harness_surfaces.py --materialize "$RUNNER_TEMP/pa-harness-materialize"
       - name: Public-content boundary
         run: python .github/scripts/check_public_content.py
       - name: Build wheel without dependency resolution
