@@ -46,6 +46,24 @@ def copy_runtime_plugin(target: Path) -> Path:
 
 
 class InstallProvenanceTests(unittest.TestCase):
+    def test_runtime_text_bytes_are_checkout_stable_lf(self) -> None:
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        for required in (
+            "/.agents/plugins/marketplace.json text eol=lf",
+            "/.codex-plugin/plugin.json text eol=lf",
+            "/.mcp.json text eol=lf",
+            "/hooks/** text eol=lf",
+            "/skills/manifest/** text eol=lf",
+            "/practical_agency/** text eol=lf",
+            "/contracts/** text eol=lf",
+        ):
+            self.assertIn(required, attributes)
+        manifest = build_runtime_manifest(ROOT)
+        for entry in manifest["files"]:
+            path = ROOT / entry["path"]
+            if path.suffix in {".json", ".md", ".py"}:
+                self.assertNotIn(b"\r\n", path.read_bytes(), entry["path"])
+
     def test_runtime_manifest_is_explicit_canonical_and_cache_free(self) -> None:
         manifest = build_runtime_manifest(ROOT)
 
