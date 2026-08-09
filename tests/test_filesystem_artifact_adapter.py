@@ -75,7 +75,12 @@ def _broker_dispatch(
                 "estimated_costs",
                 "action",
             )
-        },
+        }
+        | (
+            {"expected_before": requested["expected_before"]}
+            if "expected_before" in requested
+            else {}
+        ),
         checkpoint_store=object(),
     )
     result = dispatch_once(active, decision, adapter)
@@ -83,6 +88,65 @@ def _broker_dispatch(
 
 
 class FilesystemArtifactAdapterTests(unittest.TestCase):
+    def test_expected_before_mismatch_prevents_receipt_and_artifact_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "workspace"
+            receipt_root = Path(temp) / "mission" / "receipts"
+            target = workspace / "docs" / "alpha.md"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"changed elsewhere\n")
+            adapter = FilesystemArtifactAdapter(
+                workspace,
+                receipt_root=receipt_root,
+                allowed_paths=("docs/alpha.md",),
+            )
+
+            with self.assertRaisesRegex(
+                FilesystemArtifactError,
+                "EXPECTED_BEFORE_STATE_MISMATCH",
+            ):
+                _broker_dispatch(
+                    adapter,
+                    requested_effects=[
+                        "relpath:docs/alpha.md",
+                        "utf8:approved bytes\n",
+                    ],
+                    expected_before={"kind": "absent"},
+                )
+
+            self.assertEqual(target.read_bytes(), b"changed elsewhere\n")
+            self.assertFalse(receipt_root.exists())
+
+    def test_repository_artifact_and_mission_receipt_roots_are_separate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "workspace"
+            receipt_root = Path(temp) / "mission" / "receipts"
+            adapter = FilesystemArtifactAdapter(
+                workspace,
+                receipt_root=receipt_root,
+                allowed_paths=("docs/alpha.md",),
+            )
+
+            result, _ = _broker_dispatch(
+                adapter,
+                requested_effects=[
+                    "relpath:docs/alpha.md",
+                    "utf8:approved bytes\n",
+                ],
+                expected_before={"kind": "absent"},
+            )
+
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(
+                (workspace / "docs" / "alpha.md").read_bytes(),
+                b"approved bytes\n",
+            )
+            receipt = Path(str(result["external_receipt_ref"]))
+            self.assertEqual(receipt.parent, receipt_root.resolve())
+            journal = json.loads(receipt.read_text(encoding="utf-8"))
+            self.assertEqual(journal["before"], {"kind": "absent"})
+            self.assertEqual(journal["after"]["kind"], "regular-file")
+
     def test_adapter_construction_has_no_filesystem_effect(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "not-created"
