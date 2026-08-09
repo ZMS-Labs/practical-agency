@@ -176,7 +176,18 @@ class FileCheckpointStore:
             expected_path.relative_to(root_path)
         except ValueError as error:
             raise CheckpointError("CHECKPOINT_PATH_MISMATCH") from error
-        path = supplied_path.resolve()
+        if supplied_path.is_absolute():
+            path = supplied_path.resolve()
+        else:
+            legacy_identity = (
+                "missions",
+                receipt.mission_id,
+                "checkpoints",
+                expected_raw.name,
+            )
+            if supplied_path.parts != legacy_identity:
+                raise CheckpointError("CHECKPOINT_PATH_MISMATCH")
+            path = expected_path
         if path != expected_path:
             raise CheckpointError("CHECKPOINT_PATH_MISMATCH")
         try:

@@ -46,6 +46,21 @@ def copy_runtime_plugin(target: Path) -> Path:
 
 
 class InstallProvenanceTests(unittest.TestCase):
+    def test_tracked_mission_evidence_bytes_are_checkout_stable_lf(self) -> None:
+        completed = subprocess.run(
+            ["git", "ls-files", "missions"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        )
+        tracked = [ROOT / line for line in completed.stdout.splitlines() if line]
+        self.assertTrue(tracked)
+        for path in tracked:
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertNotIn(b"\r\n", path.read_bytes())
+
     def test_runtime_text_bytes_are_checkout_stable_lf(self) -> None:
         attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         for required in (

@@ -94,6 +94,41 @@ class CheckpointStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_PATH_MISMATCH"):
                 store.load(receipt)
 
+    def test_load_accepts_exact_legacy_repository_relative_receipt_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "workspace"
+            root = workspace / "missions" / "mission-001" / "checkpoints"
+            store = FileCheckpointStore(root)
+            receipt = store.save(self.manifest())
+            receipt_path = root / "mission-001.r00000001.receipt.json"
+            payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+            payload["path"] = (
+                "missions/mission-001/checkpoints/mission-001.r00000001.json"
+            )
+            receipt_path.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+
+            loaded = store.load_latest("mission-001")
+
+            self.assertIsNotNone(loaded)
+            manifest, loaded_receipt = loaded or (None, None)
+            self.assertEqual(manifest.mission_id, "mission-001")
+            self.assertEqual(loaded_receipt.path, payload["path"])
+
+    def test_load_rejects_other_relative_receipt_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "store"
+            store = FileCheckpointStore(root)
+            receipt = store.save(self.manifest())
+            payload = receipt.to_dict()
+            payload["path"] = "elsewhere/mission-001.r00000001.json"
+            forged = CheckpointReceipt.from_dict(payload)
+
+            with self.assertRaisesRegex(CheckpointError, "CHECKPOINT_PATH_MISMATCH"):
+                store.load(forged)
+
     def test_load_rejects_receipt_identity_that_escapes_store_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
