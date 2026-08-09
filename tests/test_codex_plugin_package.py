@@ -105,6 +105,22 @@ class CodexPluginPackageTests(unittest.TestCase):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(project["project"]["requires-python"], ">=3.11")
 
+    def test_plugin_hooks_use_codex_plugin_root_contract(self) -> None:
+        manifest = json.loads(
+            (ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
+        )
+        handlers = [
+            handler
+            for groups in manifest["hooks"].values()
+            for group in groups
+            for handler in group["hooks"]
+        ]
+        self.assertTrue(handlers)
+        for handler in handlers:
+            self.assertIn("${PLUGIN_ROOT}", handler["command"])
+            self.assertIn("%PLUGIN_ROOT%", handler["commandWindows"])
+            self.assertNotIn("CODEX_PLUGIN_ROOT", json.dumps(handler))
+
     def test_copied_plugin_starts_without_source_working_directory(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pa-plugin-") as temp:
             installed = copy_runtime_plugin(Path(temp))

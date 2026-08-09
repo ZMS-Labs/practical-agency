@@ -134,6 +134,16 @@ class ProtocolError(RuntimeError):
     """A malformed or unsupported MCP protocol request."""
 
 
+def _without_request_meta(params: object) -> object:
+    if not isinstance(params, dict):
+        return params
+    if "_meta" not in params:
+        return params
+    if not isinstance(params["_meta"], dict):
+        raise ProtocolError("MCP_PROTOCOL_ERROR")
+    return {key: value for key, value in params.items() if key != "_meta"}
+
+
 def _validate(value: object, schema: Mapping[str, Any]) -> bool:
     expected_type = schema.get("type")
     if expected_type == "object":
@@ -222,7 +232,7 @@ class McpServer:
         if set(message) - {"jsonrpc", "id", "method", "params"}:
             raise ProtocolError("MCP_PROTOCOL_ERROR")
         method = message.get("method")
-        params = message.get("params", {})
+        params = _without_request_meta(message.get("params", {}))
         if not isinstance(method, str):
             raise ProtocolError("MCP_PROTOCOL_ERROR")
         if "id" not in message:

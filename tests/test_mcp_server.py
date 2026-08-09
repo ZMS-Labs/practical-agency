@@ -211,6 +211,34 @@ class McpServerProcessTests(unittest.TestCase):
                 )
                 self.assertEqual(list(workspace.glob("missions/*/checkpoints/*.json")), [])
 
+    def test_codex_request_metadata_is_allowed_on_tool_listing_and_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = self._workspace(temp)
+            with StdioServer(workspace) as server:
+                listed = server.request(
+                    1,
+                    "tools/list",
+                    {"_meta": {"progressToken": 0}},
+                )
+                self.assertEqual(
+                    [tool["name"] for tool in listed["result"]["tools"]],
+                    TOOL_NAMES,
+                )
+
+                called = server.request(
+                    2,
+                    "tools/call",
+                    {
+                        "name": "manifest_dispatch",
+                        "arguments": {},
+                        "_meta": {"progressToken": 1},
+                    },
+                )
+                self.assertEqual(
+                    called["result"]["structuredContent"]["code"],
+                    "HOST_GATE_UNAVAILABLE",
+                )
+
     def test_unknown_method_and_malformed_tool_arguments_fail_as_protocol_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             workspace = self._workspace(temp)

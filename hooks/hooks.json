@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CODEX_PLUGIN_ROOT}/hooks/manifest_hook.py\"",
-            "commandWindows": "python \"%CODEX_PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+            "command": "python \"${PLUGIN_ROOT}/hooks/manifest_hook.py\"",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
           }
         ]
       }
@@ -17,8 +17,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CODEX_PLUGIN_ROOT}/hooks/manifest_hook.py\"",
-            "commandWindows": "python \"%CODEX_PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+            "command": "python \"${PLUGIN_ROOT}/hooks/manifest_hook.py\"",
+            "commandWindows": "python \"%PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
           }
         ]
       }
