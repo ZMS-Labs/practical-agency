@@ -93,6 +93,24 @@ class GovernedWorkspaceTests(unittest.TestCase):
             self.assertEqual(findings[0].path, "docs/alpha.md")
             self.assertEqual(findings[0].reason_code, "UNRECEIPTED_WORKSPACE_DRIFT")
 
+    def test_replaced_existing_parent_is_drift_even_when_file_bytes_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = self._workspace(temp)
+            target = workspace / "docs" / "alpha.md"
+            target.parent.mkdir()
+            target.write_bytes(b"same bytes\n")
+            baseline = capture_baseline(workspace, ["docs/alpha.md"])
+
+            target.parent.rename(workspace / "old-docs")
+            target.parent.mkdir()
+            target.write_bytes(b"same bytes\n")
+
+            findings = find_unreceipted_drift(workspace, baseline, [])
+            self.assertEqual(
+                [(item.path, item.reason_code) for item in findings],
+                [("docs/alpha.md", "UNRECEIPTED_WORKSPACE_DRIFT")],
+            )
+
     def test_governed_baseline_round_trips_in_closed_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             workspace = self._workspace(temp)

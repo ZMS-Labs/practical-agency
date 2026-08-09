@@ -147,6 +147,45 @@ class FilesystemArtifactAdapterTests(unittest.TestCase):
             self.assertEqual(journal["before"], {"kind": "absent"})
             self.assertEqual(journal["after"]["kind"], "regular-file")
 
+    def test_separate_receipt_root_replays_committed_expected_before_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "workspace"
+            receipt_root = Path(temp) / "mission" / "receipts"
+            arguments = {
+                "requested_effects": [
+                    "relpath:docs/alpha.md",
+                    "utf8:approved bytes\n",
+                ],
+                "expected_before": {"kind": "absent"},
+            }
+            first, _ = _broker_dispatch(
+                FilesystemArtifactAdapter(
+                    workspace,
+                    receipt_root=receipt_root,
+                    allowed_paths=("docs/alpha.md",),
+                ),
+                **arguments,
+            )
+
+            replay, request = _broker_dispatch(
+                FilesystemArtifactAdapter(
+                    workspace,
+                    receipt_root=receipt_root,
+                    allowed_paths=("docs/alpha.md",),
+                    fail_at="before_effect",
+                ),
+                **arguments,
+            )
+
+            self.assertEqual(replay["external_receipt_ref"], first["external_receipt_ref"])
+            verified = verify_filesystem_receipt(
+                str(replay["external_receipt_ref"]),
+                request,
+                workspace,
+                receipt_root=receipt_root,
+            )
+            self.assertEqual(verified.status, "verified")
+
     def test_adapter_construction_has_no_filesystem_effect(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "not-created"
@@ -216,6 +255,32 @@ class FilesystemArtifactAdapterTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(other["status"], "blocked")
+
+    def test_symlink_component_inside_root_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            real = root / "real"
+            real.mkdir()
+            link = root / "link"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest("directory symlinks unavailable")
+            adapter = FilesystemArtifactAdapter(
+                root,
+                allowed_paths=("link/note.txt",),
+            )
+
+            result, _ = _broker_dispatch(
+                adapter,
+                requested_effects=[
+                    "relpath:link/note.txt",
+                    "utf8:must not pass through a symlink",
+                ],
+            )
+
+            self.assertEqual(result["status"], "blocked")
+            self.assertFalse((real / "note.txt").exists())
 
     def test_unknown_action_is_declined_without_shell(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -5,6 +5,10 @@ import re
 from typing import Any, Mapping
 
 from practical_agency.deferred_interest import validate_deferred_interest
+from practical_agency.governed_workspace import (
+    GovernedWorkspaceError,
+    validate_governed_workspace_record,
+)
 from practical_agency.manifest_model import MissionStatus
 from practical_agency.proof import VerifierResult, VerifierResultError
 
@@ -84,6 +88,7 @@ OPTIONAL_OBJECT_FIELDS: dict[str, set[str]] = {
         "processed_event_ids",
         "execution_receipts",
         "verifier_results",
+        "governed_workspace",
     },
 }
 
@@ -306,6 +311,15 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
             errors.append(
                 f"VERIFIER_RESULT: continuity.verifier_results[{index}]: "
                 "VERIFIER_RESULT_MISSION_MISMATCH"
+            )
+
+    governed_workspace = continuity.get("governed_workspace")
+    if governed_workspace is not None:
+        try:
+            validate_governed_workspace_record(governed_workspace)
+        except GovernedWorkspaceError as error:
+            errors.append(
+                f"GOVERNED_WORKSPACE: continuity.governed_workspace: {error}"
             )
 
     deferred_interests = continuity.get("deferred_interests")

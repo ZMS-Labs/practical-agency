@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
@@ -65,12 +66,16 @@ _EXECUTION_INPUT_FIELDS = {
     "estimated_costs",
     "action",
 }
-_EXECUTION_REQUEST_FIELDS = _EXECUTION_INPUT_FIELDS | {
+_EXECUTION_INPUT_OPTIONAL_FIELDS = {"expected_before"}
+_EXECUTION_REQUEST_REQUIRED_FIELDS = _EXECUTION_INPUT_FIELDS | {
     "schema",
     "request_id",
     "mission_id",
     "mission_revision",
 }
+_EXECUTION_REQUEST_FIELDS = (
+    _EXECUTION_REQUEST_REQUIRED_FIELDS | _EXECUTION_INPUT_OPTIONAL_FIELDS
+)
 _EXECUTION_RECEIPT_FIELDS = {
     "schema",
     "request_id",
@@ -196,7 +201,10 @@ def _request_id(
 
 
 def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
-    if set(request) != _EXECUTION_INPUT_FIELDS:
+    if (
+        not _EXECUTION_INPUT_FIELDS.issubset(request)
+        or set(request) - _EXECUTION_INPUT_FIELDS - _EXECUTION_INPUT_OPTIONAL_FIELDS
+    ):
         return "fields"
     if not _nonempty_string(request.get("capability_id")):
         return "capability_id"
@@ -205,11 +213,32 @@ def _valid_execution_input(request: Mapping[str, Any]) -> str | None:
     for field in ("requested_permissions", "requested_effects", "estimated_costs"):
         if not _string_list(request.get(field)):
             return field
+    expected_before = request.get("expected_before")
+    if expected_before is not None:
+        if not isinstance(expected_before, Mapping):
+            return "expected_before"
+        kind = expected_before.get("kind")
+        if kind == "absent":
+            if set(expected_before) != {"kind"}:
+                return "expected_before"
+        elif kind == "regular-file":
+            digest = expected_before.get("sha256")
+            if (
+                set(expected_before) != {"kind", "sha256"}
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                return "expected_before"
+        else:
+            return "expected_before"
     return None
 
 
 def _valid_execution_request(request: Mapping[str, Any]) -> str | None:
-    if set(request) != _EXECUTION_REQUEST_FIELDS:
+    if (
+        not _EXECUTION_REQUEST_REQUIRED_FIELDS.issubset(request)
+        or set(request) - _EXECUTION_REQUEST_FIELDS
+    ):
         return "fields"
     if request.get("schema") != "execution-request@1":
         return "schema"
@@ -219,7 +248,13 @@ def _valid_execution_request(request: Mapping[str, Any]) -> str | None:
     revision = request.get("mission_revision")
     if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
         return "mission_revision"
-    return _valid_execution_input({key: request[key] for key in _EXECUTION_INPUT_FIELDS})
+    return _valid_execution_input(
+        {
+            key: request[key]
+            for key in _EXECUTION_INPUT_FIELDS | _EXECUTION_INPUT_OPTIONAL_FIELDS
+            if key in request
+        }
+    )
 
 
 def _frontier_apply_record(manifest: MissionManifest) -> Mapping[str, Any] | None:

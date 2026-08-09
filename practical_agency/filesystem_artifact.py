@@ -61,9 +61,18 @@ def _canonical_sha256(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _receipt_path(root: Path, request_id: str) -> Path:
+def _receipt_path(receipt_root: Path, request_id: str) -> Path:
     name = hashlib.sha256(request_id.encode("utf-8")).hexdigest() + ".json"
-    return (root / ".receipts" / name).resolve()
+    return (receipt_root / name).resolve()
+
+
+def _has_symlink_component(root: Path, relpath: str) -> bool:
+    current = root
+    for part in relpath.split("/"):
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def _completed_receipt_from_journal(
@@ -90,7 +99,7 @@ def _completed_receipt_from_journal(
         "coverage_limits": [
             "filesystem-artifact@1 writes text under allowlisted prefixes only",
             "no arbitrary shell",
-            "receipt journal is a local durable file under the adapter root",
+            "receipt journal is a local durable file under the configured receipt root",
             "existing committed request replayed idempotently without a new effect",
         ],
     }
@@ -108,12 +117,20 @@ class FilesystemArtifactAdapter:
         root: Path,
         *,
         allowed_prefixes: tuple[str, ...] = ("mission-artifacts/",),
+        receipt_root: Path | None = None,
+        allowed_paths: tuple[str, ...] | None = None,
         fail_at: str | None = None,
     ) -> None:
         if fail_at not in {None, "before_effect", "after_effect", "before_receipt_commit"}:
             raise ValueError("INVALID_FAILURE_INJECTION_POINT")
         self.root = Path(root).resolve()
+        self.receipt_root = (
+            Path(receipt_root).resolve()
+            if receipt_root is not None
+            else (self.root / ".receipts").resolve()
+        )
         self.allowed_prefixes = tuple(allowed_prefixes)
+        self.allowed_paths = tuple(allowed_paths) if allowed_paths is not None else None
         self.fail_at = fail_at
 
     def dispatch(
@@ -144,7 +161,7 @@ class FilesystemArtifactAdapter:
             "coverage_limits": [
                 "filesystem-artifact@1 writes text under allowlisted prefixes only",
                 "no arbitrary shell",
-                "receipt journal is a local durable file under the adapter root",
+                "receipt journal is a local durable file under the configured receipt root",
             ],
         }
 
@@ -187,13 +204,25 @@ class FilesystemArtifactAdapter:
             not _SAFE_RELPATH.fullmatch(relpath)
             or ".." in relpath.split("/")
             or relpath.startswith("/")
-            or not any(relpath.startswith(prefix) for prefix in self.allowed_prefixes)
+            or (
+                relpath not in self.allowed_paths
+                if self.allowed_paths is not None
+                else not any(relpath.startswith(prefix) for prefix in self.allowed_prefixes)
+            )
         ):
             return {
                 **base,
                 "status": "blocked",
                 "coverage_limits": base["coverage_limits"]
                 + ["relpath outside allowlisted prefixes or unsafe"],
+            }
+
+        if _has_symlink_component(self.root, relpath):
+            return {
+                **base,
+                "status": "blocked",
+                "coverage_limits": base["coverage_limits"]
+                + ["symlinked path component blocked"],
             }
 
         target = (self.root / relpath).resolve()
@@ -206,19 +235,10 @@ class FilesystemArtifactAdapter:
                 "coverage_limits": base["coverage_limits"] + ["path escape blocked"],
             }
 
-        self.root.mkdir(parents=True, exist_ok=True)
-        receipts_dir = self.root / ".receipts"
+        receipts_dir = self.receipt_root
         if receipts_dir.is_symlink():
             raise FilesystemArtifactError("RECEIPT_DIRECTORY_SYMLINK")
-        receipts_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            receipts_dir.resolve().relative_to(self.root)
-        except ValueError as error:
-            raise FilesystemArtifactError("RECEIPT_DIRECTORY_OUTSIDE_ROOT") from error
-
-        data = body.encode("utf-8")
-        digest = hashlib.sha256(data).hexdigest()
-        receipt_path = _receipt_path(self.root, request_id)
+        receipt_path = _receipt_path(receipts_dir, request_id)
         request_hash = _canonical_sha256(dict(request))
         if receipt_path.exists():
             try:
@@ -234,8 +254,41 @@ class FilesystemArtifactAdapter:
                 raise FilesystemArtifactError(
                     f"EXISTING_RECEIPT_NOT_RETRYABLE:{state}"
                 )
-            verify_filesystem_receipt(str(receipt_path), request, self.root)
+            verify_filesystem_receipt(
+                str(receipt_path),
+                request,
+                self.root,
+                receipt_root=receipts_dir,
+            )
             return _completed_receipt_from_journal(existing, receipt_path)
+
+        expected_before = request.get("expected_before")
+        if target.exists():
+            if target.is_symlink() or not target.is_file():
+                raise FilesystemArtifactError("EXPECTED_BEFORE_STATE_MISMATCH")
+            before_data = target.read_bytes()
+            before = {
+                "kind": "regular-file",
+                "bytes": len(before_data),
+                "sha256": hashlib.sha256(before_data).hexdigest(),
+            }
+        else:
+            before = {"kind": "absent"}
+        if expected_before is not None:
+            comparable_before = (
+                before
+                if expected_before.get("kind") == "absent"
+                else {"kind": before.get("kind"), "sha256": before.get("sha256")}
+            )
+            if comparable_before != expected_before:
+                raise FilesystemArtifactError("EXPECTED_BEFORE_STATE_MISMATCH")
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        receipts_dir.mkdir(parents=True, exist_ok=True)
+
+        data = body.encode("utf-8")
+        digest = hashlib.sha256(data).hexdigest()
+        after = {"kind": "regular-file", "bytes": len(data), "sha256": digest}
 
         journal: dict[str, Any] = {
             "schema": "filesystem-artifact-receipt@1",
@@ -250,6 +303,8 @@ class FilesystemArtifactAdapter:
             "artifact_path": str(target),
             "artifact_sha256": digest,
             "bytes": len(data),
+            "before": before,
+            "after": after,
             "failure": None,
         }
         _atomic_write_json(receipt_path, journal)
@@ -303,17 +358,23 @@ def inspect_filesystem_receipt(
     external_receipt_ref: str,
     expected_request: Mapping[str, Any],
     root: Path,
+    *,
+    receipt_root: Path | None = None,
 ) -> VerifierResult:
     """Return typed evidence from a receipt-bound live artifact observation."""
     root = Path(root).resolve()
     receipt = Path(external_receipt_ref).resolve()
-    receipts_root = (root / ".receipts").resolve()
+    receipts_root = (
+        Path(receipt_root).resolve()
+        if receipt_root is not None
+        else (root / ".receipts").resolve()
+    )
     try:
         receipt.relative_to(receipts_root)
     except ValueError as error:
         raise FilesystemArtifactError("RECEIPT_PATH_OUTSIDE_ROOT") from error
     expected_receipt_path = _receipt_path(
-        root, str(expected_request.get("request_id") or "")
+        receipts_root, str(expected_request.get("request_id") or "")
     )
     if receipt != expected_receipt_path:
         raise FilesystemArtifactError("RECEIPT_PATH_IDENTITY_MISMATCH")
@@ -382,7 +443,7 @@ def inspect_filesystem_receipt(
         reason_code=reason_code,
         coverage_limits=(
             "filesystem-artifact-verifier@1 observes one receipt-bound local file",
-            "receipt and artifact bytes are local to the configured adapter root",
+            "receipt and artifact bytes are local to their configured roots",
         ),
     )
 
@@ -391,6 +452,8 @@ def verify_filesystem_receipt(
     external_receipt_ref: str,
     expected_request: Mapping[str, Any],
     root: Path,
+    *,
+    receipt_root: Path | None = None,
 ) -> VerifierResult:
     """Return typed verified evidence or fail closed with its reason code."""
 
@@ -398,6 +461,7 @@ def verify_filesystem_receipt(
         external_receipt_ref,
         expected_request,
         root,
+        receipt_root=receipt_root,
     )
     if result.status != "verified":
         raise FilesystemArtifactError(result.reason_code or "ARTIFACT_NOT_VERIFIED")
