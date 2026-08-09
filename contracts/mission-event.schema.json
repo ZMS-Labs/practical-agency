@@ -47,6 +47,9 @@
         "record_watch_crossing",
         "record_execution_receipt",
         "amend_authority",
+        "propose_manifest_milestone",
+        "authorize_manifest_milestone",
+        "accept_manifest_milestone",
         "apply_mission_os"
       ]
     },

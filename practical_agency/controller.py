@@ -109,8 +109,91 @@ def _definition_record(manifest: MissionManifest) -> Mapping[str, Any]:
     return record
 
 
+def _active_milestone_record(manifest: MissionManifest) -> Mapping[str, Any] | None:
+    decisions = manifest.continuity.get("decisions", [])
+    accepted = {
+        item.get("authority_contract_sha256")
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-acceptance"
+    }
+    active = [
+        item
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-definition"
+        and item.get("authority_contract_sha256") not in accepted
+    ]
+    if len(active) > 1:
+        raise ControllerError("MANIFEST_MILESTONE_AMBIGUOUS")
+    if not active:
+        return None
+    record = active[0]
+    if set(record) != {
+        "kind",
+        "authority_contract",
+        "authority_contract_sha256",
+        "governed_workspace",
+        "return_frontier",
+        "return_next_action",
+    }:
+        raise ControllerError("AUTHORITY_CONTRACT_INVALID")
+    contract = record.get("authority_contract")
+    digest = record.get("authority_contract_sha256")
+    if (
+        not isinstance(contract, Mapping)
+        or not isinstance(digest, str)
+        or _canonical_sha256(contract) != digest
+    ):
+        raise ControllerError("AUTHORITY_CONTRACT_INVALID")
+    return record
+
+
+def _pending_milestone_proposal(
+    manifest: MissionManifest,
+) -> Mapping[str, Any] | None:
+    decisions = manifest.continuity.get("decisions", [])
+    authorized = {
+        item.get("authority_contract_sha256")
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-definition"
+    }
+    pending = [
+        item
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-proposal"
+        and item.get("authority_contract_sha256") not in authorized
+    ]
+    if len(pending) > 1:
+        raise ControllerError("MANIFEST_MILESTONE_AMBIGUOUS")
+    if not pending:
+        return None
+    record = pending[0]
+    contract = record.get("authority_contract")
+    digest = record.get("authority_contract_sha256")
+    if (
+        not isinstance(contract, Mapping)
+        or not isinstance(digest, str)
+        or _canonical_sha256(contract) != digest
+    ):
+        raise ControllerError("AUTHORITY_CONTRACT_INVALID")
+    return record
+
+
 def _durable_definition(manifest: MissionManifest) -> Mapping[str, Any]:
-    record = _definition_record(manifest)
+    standard_records = [
+        item
+        for item in manifest.continuity.get("decisions", [])
+        if isinstance(item, Mapping) and item.get("kind") == "manifest-definition"
+    ]
+    if standard_records:
+        record = _definition_record(manifest)
+    else:
+        record = _active_milestone_record(manifest)
+        if record is None:
+            raise ControllerError("AUTHORITY_CONTRACT_INVALID")
     contract = record["authority_contract"]
     definition = contract.get("definition") if isinstance(contract, Mapping) else None
     if not isinstance(definition, Mapping):
@@ -423,19 +506,71 @@ class ManifestController:
         binding = self._binding(
             "manifest_define", _host_context_ref, _host_gate_ref
         )
+        discovered: DiscoveredMission | None = None
         try:
             discovered = discover_active_mission(binding.workspace_root)
         except MissionDiscoveryError as error:
             if str(error) != "ACTIVE_MISSION_NOT_FOUND":
                 raise ControllerError(str(error)) from error
-        else:
-            raise ControllerError(
-                f"MISSION_DEFINITION_ALREADY_EXISTS:{discovered.manifest.mission_id}"
-            )
 
         normalized, baseline = self._normalize_definition(
             binding.workspace_root, definition
         )
+        if discovered is not None:
+            manifest = discovered.manifest
+            if manifest.state.get("status") != "active":
+                raise ControllerError(
+                    f"MISSION_DEFINITION_ALREADY_EXISTS:{manifest.mission_id}"
+                )
+            standard_records = [
+                item
+                for item in manifest.continuity.get("decisions", [])
+                if isinstance(item, Mapping)
+                and item.get("kind") == "manifest-definition"
+            ]
+            if (
+                standard_records
+                or _active_milestone_record(manifest) is not None
+                or _pending_milestone_proposal(manifest) is not None
+            ):
+                raise ControllerError(
+                    f"MISSION_DEFINITION_ALREADY_EXISTS:{manifest.mission_id}"
+                )
+            contract = {
+                "schema": "manifest-authority-contract@1",
+                "mission_id": manifest.mission_id,
+                "definition": deepcopy(normalized),
+            }
+            contract_hash = _canonical_sha256(contract)
+            try:
+                proposed = apply_event_data(
+                    manifest,
+                    "propose_manifest_milestone",
+                    MISSION_STEWARD_REF,
+                    {
+                        "authority_contract": contract,
+                        "authority_contract_sha256": contract_hash,
+                        "governed_workspace": baseline,
+                    },
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            receipt = self._store(
+                binding.workspace_root, proposed.mission_id
+            ).save(proposed)
+            return {
+                "status": "definition-proposed",
+                **_status_summary(proposed),
+                "mission_id": proposed.mission_id,
+                "revision": proposed.revision,
+                "mission_status": proposed.state["status"],
+                "authority_contract_sha256": contract_hash,
+                "approval_phrase": f"approve manifest {contract_hash}",
+                "checkpoint_ref": receipt.path,
+                "checkpoint_sha256": receipt.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
+
         nonce_sha256 = _sha256_text(binding.context.context_nonce)
         mission_id = f"manifest-{nonce_sha256[:24]}"
         mission_dir = binding.workspace_root / "missions" / mission_id
@@ -554,6 +689,53 @@ class ManifestController:
         )
         discovered = self._discover(binding.workspace_root)
         manifest = discovered.manifest
+        if manifest.state.get("status") == "active":
+            proposal = _pending_milestone_proposal(manifest)
+            if proposal is None:
+                raise ControllerError("MISSION_NOT_DRAFT")
+            durable_hash = str(proposal["authority_contract_sha256"])
+            if authority_contract_sha256 != durable_hash:
+                raise ControllerError("AUTHORITY_CONTRACT_MISMATCH")
+            approval_phrase = f"approve manifest {durable_hash}"
+            if approval_phrase not in binding.context.prompt:
+                raise ControllerError("HOST_CONTEXT_INVALID")
+            try:
+                authorized = apply_event_data(
+                    manifest,
+                    "authorize_manifest_milestone",
+                    str(manifest.authority["operator_ref"]),
+                    {"authority_contract_sha256": durable_hash},
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            store = self._store(binding.workspace_root, authorized.mission_id)
+            authorized_checkpoint = store.save(authorized)
+            proposal = propose_frontier_patch(
+                authorized, ["write approved governed artifact"]
+            )
+            try:
+                active = apply_event_data(
+                    authorized,
+                    "apply_mission_os",
+                    MISSION_STEWARD_REF,
+                    proposal.to_event_data(),
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            latest = store.save(active)
+            return {
+                "status": "authorized-milestone",
+                **_status_summary(active),
+                "mission_id": active.mission_id,
+                "revision": active.revision,
+                "mission_status": active.state["status"],
+                "next_action": active.state["next_action"],
+                "authority_contract_sha256": durable_hash,
+                "checkpoint_ref": authorized_checkpoint.path,
+                "latest_checkpoint_ref": latest.path,
+                "latest_checkpoint_sha256": latest.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
         if manifest.state.get("status") != "draft":
             raise ControllerError("MISSION_NOT_DRAFT")
         record = _definition_record(manifest)
@@ -867,6 +1049,33 @@ class ManifestController:
                 "process_instance_id": self.process_instance_id,
             }
 
+        if _active_milestone_record(manifest) is not None:
+            milestone_frontier = ["independent acceptance of governed milestone"]
+            if manifest.state.get("current_frontier") != milestone_frontier:
+                try:
+                    proposal = propose_frontier_patch(manifest, milestone_frontier)
+                    manifest = apply_event_data(
+                        manifest,
+                        "apply_mission_os",
+                        MISSION_STEWARD_REF,
+                        proposal.to_event_data(),
+                    )
+                except (TransitionError, ValueError) as error:
+                    raise ControllerError(str(error)) from error
+            checkpoint = store.save(manifest)
+            return {
+                "status": "verified-milestone",
+                **_status_summary(manifest),
+                "mission_id": manifest.mission_id,
+                "revision": manifest.revision,
+                "mission_status": manifest.state["status"],
+                "next_action": manifest.state["next_action"],
+                "observations": observations,
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
+
         if manifest.state.get("status") == "active":
             try:
                 manifest = apply_event_data(
@@ -923,18 +1132,44 @@ class ManifestController:
             "principal separation is not externally proven",
             "declared roles and process separation are not distinct-principal evidence",
         ]
+        acceptance_data = {
+            "verdict": verdict,
+            "evidence_refs": list(dict.fromkeys(evidence_refs)),
+            "coverage_limits": coverage_limits,
+            "separation_assurance": separation_assurance,
+            "principal_evidence_ref": principal_evidence_ref,
+        }
+        if _active_milestone_record(manifest) is not None:
+            try:
+                continued = apply_event_data(
+                    manifest,
+                    "accept_manifest_milestone",
+                    acceptor_ref,
+                    acceptance_data,
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            checkpoint = self._store(
+                binding.workspace_root, continued.mission_id
+            ).save(continued)
+            return {
+                "status": "accepted-milestone",
+                **_status_summary(continued),
+                "mission_id": continued.mission_id,
+                "revision": continued.revision,
+                "mission_status": continued.state["status"],
+                "separation_assurance": separation_assurance,
+                "coverage_limits": coverage_limits,
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
         try:
             completed = apply_event_data(
                 manifest,
                 "accept",
                 acceptor_ref,
-                {
-                    "verdict": verdict,
-                    "evidence_refs": list(dict.fromkeys(evidence_refs)),
-                    "coverage_limits": coverage_limits,
-                    "separation_assurance": separation_assurance,
-                    "principal_evidence_ref": principal_evidence_ref,
-                },
+                acceptance_data,
             )
         except TransitionError as error:
             raise ControllerError(str(error)) from error

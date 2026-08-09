@@ -4,9 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from practical_agency.checkpoint_store import FileCheckpointStore
 from practical_agency.controller import ControllerError, ManifestController
 from practical_agency.host_evidence import write_host_context, write_host_gate
+from practical_agency.manifest_model import MissionManifest
 from practical_agency.mission_repository import discover_active_mission
+from tests.helpers import minimal_payload
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -241,6 +244,151 @@ class ManifestControllerEngagementTests(unittest.TestCase):
             self.assertEqual(result["drift_findings"], [])
             self.assertNotEqual(result["process_instance_id"], first.process_instance_id)
             self.assertNotIn("mission_path", result)
+
+    def test_active_legacy_mission_accepts_bounded_milestone_without_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = self._workspace(temp)
+            payload = minimal_payload()
+            payload["mission_id"] = "legacy-mission"
+            payload["state"] = {
+                "status": "active",
+                "completed_actions": [],
+                "current_frontier": ["continue broader mission"],
+                "blockers": [],
+                "next_action": "continue broader mission",
+            }
+            payload["continuity"]["prior_checkpoint"] = "fixture:legacy-r1"
+            original_instruction = payload["authority"]["instruction"]
+            original_desired_state = payload["outcome"]["desired_state"]
+            FileCheckpointStore(
+                workspace / "missions" / "legacy-mission" / "checkpoints"
+            ).save(MissionManifest.from_dict(payload))
+
+            first = ManifestController(plugin_root=ROOT)
+            definition = self._definition()
+            proposed = first.manifest_define(
+                definition=definition,
+                **self._host_refs(
+                    workspace,
+                    "manifest_define",
+                    prompt="$manifest continue with this bounded milestone",
+                    turn="milestone-define",
+                ),
+            )
+            contract_hash = str(proposed["authority_contract_sha256"])
+            self.assertEqual(proposed["status"], "definition-proposed")
+            before_authorize = discover_active_mission(workspace).manifest
+            self.assertEqual(before_authorize.authority["instruction"], original_instruction)
+            self.assertEqual(before_authorize.authority["amendments"], [])
+
+            with self.assertRaisesRegex(ControllerError, "HOST_CONTEXT_INVALID"):
+                first.manifest_authorize(
+                    authority_contract_sha256=contract_hash,
+                    **self._host_refs(
+                        workspace,
+                        "manifest_authorize",
+                        prompt="yes",
+                        turn="milestone-authorize-refused",
+                    ),
+                )
+            self.assertEqual(
+                discover_active_mission(workspace).manifest.revision,
+                before_authorize.revision,
+            )
+
+            authorized = first.manifest_authorize(
+                authority_contract_sha256=contract_hash,
+                **self._host_refs(
+                    workspace,
+                    "manifest_authorize",
+                    prompt=f"approve manifest {contract_hash}",
+                    turn="milestone-authorize",
+                ),
+            )
+            self.assertEqual(authorized["status"], "authorized-milestone")
+            first.manifest_dispatch(
+                **self._host_refs(
+                    workspace,
+                    "manifest_dispatch",
+                    prompt="continue the manifest milestone",
+                    turn="milestone-dispatch",
+                )
+            )
+            artifact = definition["governed_artifacts"][0]
+            target = workspace / str(artifact["path"])
+            target.write_bytes(b"planted drift\n")
+
+            second = ManifestController(plugin_root=ROOT)
+            resumed = second.manifest_engage(
+                **self._host_refs(
+                    workspace,
+                    "manifest_engage",
+                    prompt="manifest this",
+                    turn="milestone-resume",
+                )
+            )
+            self.assertEqual(resumed["mission_id"], "legacy-mission")
+            self.assertIn("repair live state", resumed["next_action"])
+            second.manifest_dispatch(
+                **self._host_refs(
+                    workspace,
+                    "manifest_dispatch",
+                    prompt="repair the manifest milestone",
+                    turn="milestone-repair",
+                )
+            )
+
+            third = ManifestController(plugin_root=ROOT)
+            verified = third.manifest_verify(
+                **self._host_refs(
+                    workspace,
+                    "manifest_verify",
+                    prompt="verify the manifest milestone",
+                    turn="milestone-verify",
+                )
+            )
+            self.assertEqual(verified["status"], "verified-milestone")
+            self.assertEqual(verified["mission_status"], "active")
+            with self.assertRaisesRegex(
+                ControllerError, "INDEPENDENT_ACCEPTANCE_REQUIRED"
+            ):
+                third.manifest_accept(
+                    acceptor_ref="mission-steward",
+                    verdict="PASS",
+                    separation_assurance="declared-role-separation",
+                    **self._host_refs(
+                        workspace,
+                        "manifest_accept",
+                        prompt="self-accept the manifest milestone",
+                        turn="milestone-self-accept-refused",
+                    ),
+                )
+            accepted = third.manifest_accept(
+                acceptor_ref="acceptor:operator-review",
+                verdict="PASS",
+                separation_assurance="declared-role-separation",
+                **self._host_refs(
+                    workspace,
+                    "manifest_accept",
+                    prompt="accept the manifest milestone",
+                    turn="milestone-accept",
+                ),
+            )
+
+            latest = discover_active_mission(workspace).manifest
+            self.assertEqual(accepted["status"], "accepted-milestone")
+            self.assertEqual(latest.state["status"], "active")
+            self.assertEqual(latest.state["current_frontier"], ["continue broader mission"])
+            self.assertEqual(latest.authority["instruction"], original_instruction)
+            self.assertEqual(latest.authority["amendments"], [definition["instruction"]])
+            self.assertEqual(latest.outcome["desired_state"], original_desired_state)
+            self.assertEqual(target.read_text(encoding="utf-8"), artifact["content"])
+            self.assertTrue(
+                any(
+                    item.get("kind") == "manifest-milestone-acceptance"
+                    for item in latest.continuity["decisions"]
+                )
+            )
 
     def test_dispatch_uses_durable_intended_bytes_and_current_host_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

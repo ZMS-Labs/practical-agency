@@ -1,6 +1,8 @@
 """Closed, authority-preserving mission-state transitions."""
 from __future__ import annotations
 
+import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -8,6 +10,10 @@ from uuid import uuid4
 from typing import Any, Mapping
 
 from practical_agency.deferred_interest import validate_deferred_interest
+from practical_agency.governed_workspace import (
+    GovernedWorkspaceError,
+    validate_governed_workspace_record,
+)
 from practical_agency.manifest_model import MissionManifest, MissionStatus
 from practical_agency.mission_os import (
     _defer_critical_path,
@@ -151,11 +157,118 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.PAUSED.value,
         MissionStatus.BLOCKED.value,
     },
+    "propose_manifest_milestone": {MissionStatus.ACTIVE.value},
+    "authorize_manifest_milestone": {MissionStatus.ACTIVE.value},
+    "accept_manifest_milestone": {MissionStatus.ACTIVE.value},
     "apply_mission_os": {
         MissionStatus.ACTIVE.value,
         MissionStatus.COMPLETED.value,
     },
 }
+
+
+_MANIFEST_DEFINITION_FIELDS = {
+    "instruction",
+    "desired_state",
+    "governed_artifacts",
+    "permissions",
+    "protected_state",
+    "acceptable_costs",
+    "escalation_required_for",
+    "stop_conditions",
+    "completion_acceptor",
+}
+
+
+def _canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_manifest_milestone_contract(
+    manifest: MissionManifest,
+    contract: object,
+    digest: object,
+    governed_workspace: object,
+) -> tuple[Mapping[str, Any], str]:
+    if (
+        not isinstance(contract, Mapping)
+        or set(contract) != {"schema", "mission_id", "definition"}
+        or contract.get("schema") != "manifest-authority-contract@1"
+        or contract.get("mission_id") != manifest.mission_id
+        or not isinstance(digest, str)
+        or _canonical_mapping_sha256(contract) != digest
+    ):
+        raise TransitionError("AUTHORITY_CONTRACT_INVALID")
+    definition = contract.get("definition")
+    if not isinstance(definition, Mapping) or set(definition) != _MANIFEST_DEFINITION_FIELDS:
+        raise TransitionError("MISSION_DEFINITION_INVALID")
+    for field in (
+        "instruction",
+        "desired_state",
+        "completion_acceptor",
+    ):
+        if not isinstance(definition.get(field), str) or not definition[field].strip():
+            raise TransitionError("MISSION_DEFINITION_INVALID")
+    for field in (
+        "permissions",
+        "protected_state",
+        "acceptable_costs",
+        "escalation_required_for",
+        "stop_conditions",
+    ):
+        values = definition.get(field)
+        if (
+            not isinstance(values, list)
+            or not values
+            or any(not isinstance(item, str) or not item.strip() for item in values)
+        ):
+            raise TransitionError("MISSION_DEFINITION_INVALID")
+    artifacts = definition.get("governed_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise TransitionError("MISSION_DEFINITION_INVALID")
+    for artifact in artifacts:
+        if (
+            not isinstance(artifact, Mapping)
+            or set(artifact) != {"path", "content"}
+            or not isinstance(artifact.get("path"), str)
+            or not artifact["path"].strip()
+            or not isinstance(artifact.get("content"), str)
+        ):
+            raise TransitionError("MISSION_DEFINITION_INVALID")
+    try:
+        validate_governed_workspace_record(governed_workspace)
+    except GovernedWorkspaceError as error:
+        raise TransitionError(str(error)) from error
+    if not isinstance(governed_workspace, Mapping) or governed_workspace.get("paths") != [
+        artifact["path"] for artifact in artifacts
+    ]:
+        raise TransitionError("GOVERNED_WORKSPACE_INVALID")
+    return definition, digest
+
+
+def _active_manifest_milestone_definition(
+    continuity: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    decisions = continuity.get("decisions", [])
+    accepted = {
+        item.get("authority_contract_sha256")
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-acceptance"
+    }
+    active = [
+        item
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-definition"
+        and item.get("authority_contract_sha256") not in accepted
+    ]
+    if len(active) > 1:
+        raise TransitionError("MANIFEST_MILESTONE_AMBIGUOUS")
+    return active[0] if active else None
 
 
 def _required_string(data: Mapping[str, Any], key: str, code: str) -> str:
@@ -319,6 +432,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
     payload = deepcopy(dict(event.data))
     state = data["state"]
     authority = data["authority"]
+    truth = data["truth"]
     continuity = data["continuity"]
     continuity.setdefault("processed_event_ids", [])
     continuity.setdefault("execution_receipts", [])
@@ -815,6 +929,170 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 if not isinstance(item, str) or not item.strip():
                     raise TransitionError(f"INVALID_AMENDMENT_ITEM:{key}")
                 _append_unique(authority[field], item)
+
+    elif event.kind == "propose_manifest_milestone":
+        _require_mission_steward(event)
+        if set(payload) != {
+            "authority_contract",
+            "authority_contract_sha256",
+            "governed_workspace",
+        }:
+            raise TransitionError("MANIFEST_MILESTONE_PROPOSAL_INVALID")
+        if any(
+            isinstance(item, Mapping)
+            and item.get("kind") == "manifest-definition"
+            for item in continuity.get("decisions", [])
+        ):
+            raise TransitionError("MISSION_DEFINITION_ALREADY_EXISTS")
+        if _active_manifest_milestone_definition(continuity) is not None:
+            raise TransitionError("MANIFEST_MILESTONE_ALREADY_ACTIVE")
+        unresolved_proposals = [
+            item
+            for item in continuity.get("decisions", [])
+            if isinstance(item, Mapping)
+            and item.get("kind") == "manifest-milestone-proposal"
+            and not any(
+                isinstance(later, Mapping)
+                and later.get("kind") == "manifest-milestone-definition"
+                and later.get("authority_contract_sha256")
+                == item.get("authority_contract_sha256")
+                for later in continuity.get("decisions", [])
+            )
+        ]
+        if unresolved_proposals:
+            raise TransitionError("MANIFEST_MILESTONE_PROPOSAL_EXISTS")
+        _, digest = _validate_manifest_milestone_contract(
+            manifest,
+            payload.get("authority_contract"),
+            payload.get("authority_contract_sha256"),
+            payload.get("governed_workspace"),
+        )
+        continuity["decisions"].append(
+            {
+                "kind": "manifest-milestone-proposal",
+                "authority_contract": deepcopy(dict(payload["authority_contract"])),
+                "authority_contract_sha256": digest,
+                "governed_workspace": deepcopy(dict(payload["governed_workspace"])),
+                "return_frontier": list(state["current_frontier"]),
+                "return_next_action": state["next_action"],
+            }
+        )
+
+    elif event.kind == "authorize_manifest_milestone":
+        _operator_only(manifest, event)
+        if set(payload) != {"authority_contract_sha256"}:
+            raise TransitionError("MANIFEST_MILESTONE_AUTHORIZATION_INVALID")
+        digest = _required_string(
+            payload,
+            "authority_contract_sha256",
+            "AUTHORITY_CONTRACT_REQUIRED",
+        )
+        proposals = [
+            item
+            for item in continuity.get("decisions", [])
+            if isinstance(item, Mapping)
+            and item.get("kind") == "manifest-milestone-proposal"
+            and item.get("authority_contract_sha256") == digest
+        ]
+        if len(proposals) != 1:
+            raise TransitionError("AUTHORITY_CONTRACT_INVALID")
+        if any(
+            isinstance(item, Mapping)
+            and item.get("kind") == "manifest-milestone-definition"
+            and item.get("authority_contract_sha256") == digest
+            for item in continuity.get("decisions", [])
+        ):
+            raise TransitionError("MANIFEST_MILESTONE_ALREADY_AUTHORIZED")
+        if _active_manifest_milestone_definition(continuity) is not None:
+            raise TransitionError("MANIFEST_MILESTONE_ALREADY_ACTIVE")
+        proposal = proposals[0]
+        definition, _ = _validate_manifest_milestone_contract(
+            manifest,
+            proposal.get("authority_contract"),
+            digest,
+            proposal.get("governed_workspace"),
+        )
+        amendment = str(definition["instruction"])
+        authority["amendments"].append(amendment)
+        for field in (
+            "permissions",
+            "protected_state",
+            "acceptable_costs",
+            "escalation_required_for",
+        ):
+            for item in definition[field]:
+                _append_unique(authority[field], item)
+        continuity["governed_workspace"] = deepcopy(
+            dict(proposal["governed_workspace"])
+        )
+        continuity["decisions"].append(
+            {
+                "kind": "manifest-milestone-definition",
+                "authority_contract": deepcopy(dict(proposal["authority_contract"])),
+                "authority_contract_sha256": digest,
+                "governed_workspace": deepcopy(dict(proposal["governed_workspace"])),
+                "return_frontier": list(proposal["return_frontier"]),
+                "return_next_action": proposal["return_next_action"],
+            }
+        )
+        for artifact in definition["governed_artifacts"]:
+            _append_unique(truth["subject_refs"], f"file:{artifact['path']}")
+
+    elif event.kind == "accept_manifest_milestone":
+        definition_record = _active_manifest_milestone_definition(continuity)
+        if definition_record is None:
+            raise TransitionError("MANIFEST_MILESTONE_NOT_ACTIVE")
+        contract = definition_record.get("authority_contract")
+        definition = contract.get("definition") if isinstance(contract, Mapping) else None
+        if not isinstance(definition, Mapping):
+            raise TransitionError("AUTHORITY_CONTRACT_INVALID")
+        if (
+            event.actor_ref != definition.get("completion_acceptor")
+            or event.actor_ref in _material_workers(data)
+        ):
+            raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
+        if payload.get("verdict") != "PASS":
+            raise TransitionError("PASS_VERDICT_REQUIRED")
+        evidence_refs, coverage_limits = _acceptance_evidence(payload)
+        separation_assurance, principal_evidence_ref = _acceptance_assurance(payload)
+        latest_results: dict[str, VerifierResult] = {}
+        for raw in continuity.get("verifier_results", []):
+            try:
+                result = VerifierResult.from_dict(raw)
+            except VerifierResultError:
+                continue
+            latest_results[result.proof_ref] = result
+        proof_refs = [
+            f"file:{artifact['path']}"
+            for artifact in definition.get("governed_artifacts", [])
+            if isinstance(artifact, Mapping) and isinstance(artifact.get("path"), str)
+        ]
+        missing = [
+            ref
+            for ref in proof_refs
+            if ref not in latest_results or latest_results[ref].status != "verified"
+        ]
+        if missing:
+            raise TransitionError("COMPLETION_PROOF_MISSING:" + ",".join(missing))
+        digest = str(definition_record["authority_contract_sha256"])
+        milestone_ref = f"manifest-milestone:{digest}"
+        continuity["decisions"].append(
+            {
+                "kind": "manifest-milestone-acceptance",
+                "authority_contract_sha256": digest,
+                "actor_ref": event.actor_ref,
+                "verdict": "PASS",
+                "evidence_refs": evidence_refs,
+                "coverage_limits": coverage_limits,
+                "separation_assurance": separation_assurance,
+                "principal_evidence_ref": principal_evidence_ref,
+            }
+        )
+        _append_unique(continuity["durable_artifacts"], milestone_ref)
+        _append_unique(state["completed_actions"], milestone_ref)
+        state["current_frontier"] = list(definition_record["return_frontier"])
+        state["next_action"] = definition_record["return_next_action"]
+        continuity.pop("governed_workspace", None)
 
     elif event.kind == "apply_mission_os":
         if set(payload) != {"proposal"}:
