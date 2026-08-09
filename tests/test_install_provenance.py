@@ -46,6 +46,13 @@ def copy_runtime_plugin(target: Path) -> Path:
 
 
 class InstallProvenanceTests(unittest.TestCase):
+    def test_governed_artifact_bytes_are_checkout_stable_lf(self) -> None:
+        relative = "docs/operations/codex-manifest-alpha.md"
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+        self.assertIn(f"/{relative} text eol=lf", attributes)
+        self.assertNotIn(b"\r\n", (ROOT / relative).read_bytes())
+
     def test_tracked_mission_evidence_bytes_are_checkout_stable_lf(self) -> None:
         completed = subprocess.run(
             ["git", "ls-files", "missions"],
