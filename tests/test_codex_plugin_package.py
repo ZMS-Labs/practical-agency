@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -87,6 +88,7 @@ class CodexPluginPackageTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+        self.assertEqual(marketplace["name"], "practical-agency-dev")
         self.assertEqual(len(marketplace["plugins"]), 1)
         entry = marketplace["plugins"][0]
         self.assertEqual(entry["name"], "practical-agency")
@@ -99,6 +101,9 @@ class CodexPluginPackageTests(unittest.TestCase):
         encoded = json.dumps([plugin, mcp, marketplace])
         self.assertNotIn(str(ROOT), encoded)
         self.assertNotIn("Y:\\\\", encoded)
+
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(project["project"]["requires-python"], ">=3.11")
 
     def test_copied_plugin_starts_without_source_working_directory(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pa-plugin-") as temp:

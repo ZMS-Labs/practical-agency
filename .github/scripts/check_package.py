@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +104,13 @@ def _mcp_tool_names(installed: Path) -> list[str]:
 
 def main() -> int:
     errors: list[str] = []
+    try:
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        errors.append(f"PYPROJECT_INVALID:{error}")
+    else:
+        if project.get("project", {}).get("requires-python") != ">=3.11":
+            errors.append("PYTHON_RUNTIME_CONTRACT_INVALID")
     all_skills = sorted(ROOT.rglob("SKILL.md"))
     expected = ROOT / "skills" / "manifest" / "SKILL.md"
     if all_skills != [expected]:
@@ -171,6 +179,8 @@ def main() -> int:
     }:
         errors.append("CODEX_MCP_DECLARATION_INVALID")
     marketplace = _read_json(".agents/plugins/marketplace.json", errors)
+    if isinstance(marketplace, dict) and marketplace.get("name") != "practical-agency-dev":
+        errors.append("CODEX_MARKETPLACE_NAME_INVALID")
     plugins = marketplace.get("plugins") if isinstance(marketplace, dict) else None
     if not isinstance(plugins, list) or len(plugins) != 1:
         errors.append("CODEX_MARKETPLACE_PLUGIN_SET_INVALID")
