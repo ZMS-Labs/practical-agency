@@ -8,7 +8,18 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from practical_agency.checkpoint_store import FileCheckpointStore
+from practical_agency.checkpoint_store import (
+    FileCheckpointStore,
+    ReconciliationFinding,
+    apply_reconciliation_findings,
+)
+from practical_agency.coordinator import CoordinationError, coordinate_once, dispatch_once
+from practical_agency.filesystem_artifact import (
+    FilesystemArtifactAdapter,
+    FilesystemArtifactError,
+    inspect_filesystem_receipt,
+    verify_filesystem_receipt,
+)
 from practical_agency.governed_workspace import (
     GovernedWorkspaceError,
     capture_baseline,
@@ -26,7 +37,11 @@ from practical_agency.mission_repository import (
     MissionDiscoveryError,
     discover_active_mission,
 )
-from practical_agency.state_machine import MISSION_STEWARD_REF, apply_event_data
+from practical_agency.state_machine import (
+    MISSION_STEWARD_REF,
+    TransitionError,
+    apply_event_data,
+)
 
 
 class ControllerError(RuntimeError):
@@ -94,6 +109,71 @@ def _definition_record(manifest: MissionManifest) -> Mapping[str, Any]:
     return record
 
 
+def _durable_definition(manifest: MissionManifest) -> Mapping[str, Any]:
+    record = _definition_record(manifest)
+    contract = record["authority_contract"]
+    definition = contract.get("definition") if isinstance(contract, Mapping) else None
+    if not isinstance(definition, Mapping):
+        raise ControllerError("AUTHORITY_CONTRACT_INVALID")
+    return definition
+
+
+def _latest_receipt_for_path(
+    manifest: MissionManifest, relpath: str
+) -> Mapping[str, Any] | None:
+    proof_ref = f"file:{relpath}"
+    for receipt in reversed(manifest.continuity.get("execution_receipts", [])):
+        if (
+            isinstance(receipt, Mapping)
+            and receipt.get("status") == "completed"
+            and proof_ref in receipt.get("artifact_refs", [])
+            and isinstance(receipt.get("request"), Mapping)
+            and isinstance(receipt.get("external_receipt_ref"), str)
+        ):
+            return receipt
+    return None
+
+
+def _result_recorded(manifest: MissionManifest, result_ref: str) -> bool:
+    return any(
+        isinstance(item, Mapping) and item.get("result_ref") == result_ref
+        for item in manifest.continuity.get("verifier_results", [])
+    )
+
+
+def _request_expected_before(state: Mapping[str, Any]) -> dict[str, Any]:
+    if state.get("kind") == "absent":
+        return {"kind": "absent"}
+    digest = state.get("sha256")
+    if state.get("kind") != "regular-file" or not isinstance(digest, str):
+        raise ControllerError("GOVERNED_WORKSPACE_INVALID")
+    return {"kind": "regular-file", "sha256": digest}
+
+
+def _status_summary(manifest: MissionManifest) -> dict[str, Any]:
+    governed = manifest.continuity.get("governed_workspace")
+    governed_paths = (
+        list(governed.get("paths", [])) if isinstance(governed, Mapping) else []
+    )
+    return {
+        "mission_id": manifest.mission_id,
+        "revision": manifest.revision,
+        "mission_status": manifest.state["status"],
+        "authority_scope": {
+            "permissions": list(manifest.authority["permissions"]),
+            "protected_state": list(manifest.authority["protected_state"]),
+            "acceptable_costs": list(manifest.authority["acceptable_costs"]),
+            "escalation_required_for": list(
+                manifest.authority["escalation_required_for"]
+            ),
+            "governed_paths": governed_paths,
+        },
+        "frontier": list(manifest.state["current_frontier"]),
+        "next_action": manifest.state["next_action"],
+        "unresolved_verdicts": list(manifest.integrity["unresolved_verdicts"]),
+    }
+
+
 class ManifestController:
     """Compose pathless mission operations without exposing storage identity."""
 
@@ -153,6 +233,56 @@ class ManifestController:
             raise ControllerError(str(error)) from error
 
         manifest = discovered.manifest
+        store = self._store(binding.workspace_root, manifest.mission_id)
+        try:
+            definition = _durable_definition(manifest)
+        except ControllerError:
+            definition = {}
+        artifacts = definition.get("governed_artifacts")
+        if isinstance(artifacts, list):
+            for artifact in artifacts:
+                relpath = artifact.get("path") if isinstance(artifact, Mapping) else None
+                if not isinstance(relpath, str):
+                    continue
+                receipt = _latest_receipt_for_path(manifest, relpath)
+                if receipt is None:
+                    continue
+                try:
+                    observation = inspect_filesystem_receipt(
+                        str(receipt["external_receipt_ref"]),
+                        receipt["request"],
+                        binding.workspace_root,
+                        receipt_root=discovered.mission_dir / "receipts",
+                    )
+                except FilesystemArtifactError as error:
+                    raise ControllerError(str(error)) from error
+                if observation.status != "verified":
+                    if not _result_recorded(manifest, observation.result_ref):
+                        manifest = apply_event_data(
+                            manifest,
+                            "record_verifier_result",
+                            "observer:artifact-verifier",
+                            {"result": observation.to_dict()},
+                        )
+                    checkpoint = store.save(manifest)
+                    return {
+                        "status": "engaged",
+                        **_status_summary(manifest),
+                        "mission_id": manifest.mission_id,
+                        "revision": manifest.revision,
+                        "mission_status": manifest.state["status"],
+                        "next_action": manifest.state["next_action"],
+                        "reason_code": observation.reason_code,
+                        "checkpoint_ref": checkpoint.path,
+                        "checkpoint_sha256": checkpoint.sha256,
+                        "drift_findings": [
+                            {
+                                "path": relpath,
+                                "reason_code": observation.reason_code,
+                            }
+                        ],
+                        "process_instance_id": self.process_instance_id,
+                    }
         governed = manifest.continuity.get("governed_workspace")
         try:
             findings = (
@@ -166,8 +296,52 @@ class ManifestController:
             )
         except GovernedWorkspaceError as error:
             raise ControllerError(str(error)) from error
+        if findings and manifest.state.get("status") != "draft":
+            live = capture_baseline(
+                binding.workspace_root, [item.path for item in findings]
+            )
+            baseline_by_path = {
+                item["path"]: item
+                for item in governed["baseline"]
+                if isinstance(item, Mapping)
+            }
+            live_by_path = {
+                item["path"]: item
+                for item in live["baseline"]
+                if isinstance(item, Mapping)
+            }
+            manifest = apply_reconciliation_findings(
+                manifest,
+                [
+                    ReconciliationFinding(
+                        subject_ref=f"file:{item.path}",
+                        checkpoint_value=baseline_by_path[item.path],
+                        live_value=live_by_path[item.path],
+                        classification="CONTRADICTED",
+                    )
+                    for item in findings
+                ],
+            )
+            checkpoint = store.save(manifest)
+            return {
+                "status": "engaged",
+                **_status_summary(manifest),
+                "mission_id": manifest.mission_id,
+                "revision": manifest.revision,
+                "mission_status": manifest.state["status"],
+                "next_action": manifest.state["next_action"],
+                "reason_code": "UNRECEIPTED_WORKSPACE_DRIFT",
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "drift_findings": [
+                    {"path": item.path, "reason_code": item.reason_code}
+                    for item in findings
+                ],
+                "process_instance_id": self.process_instance_id,
+            }
         return {
             "status": "engaged",
+            **_status_summary(manifest),
             "mission_id": manifest.mission_id,
             "revision": manifest.revision,
             "mission_status": manifest.state["status"],
@@ -357,6 +531,7 @@ class ManifestController:
         receipt = self._store(binding.workspace_root, mission_id).save(manifest)
         return {
             "status": "definition-created",
+            **_status_summary(manifest),
             "mission_id": mission_id,
             "revision": manifest.revision,
             "mission_status": manifest.state["status"],
@@ -410,6 +585,7 @@ class ManifestController:
         latest = store.save(active)
         return {
             "status": "authorized",
+            **_status_summary(active),
             "mission_id": active.mission_id,
             "revision": active.revision,
             "mission_status": active.state["status"],
@@ -418,5 +594,362 @@ class ManifestController:
             "checkpoint_ref": active.continuity["prior_checkpoint"],
             "latest_checkpoint_ref": latest.path,
             "latest_checkpoint_sha256": latest.sha256,
+            "process_instance_id": self.process_instance_id,
+        }
+
+    @staticmethod
+    def _artifact_for_dispatch(
+        manifest: MissionManifest,
+    ) -> tuple[Mapping[str, Any], bool]:
+        definition = _durable_definition(manifest)
+        artifacts = definition.get("governed_artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise ControllerError("GOVERNED_ARTIFACT_NOT_FOUND")
+        next_action = manifest.state.get("next_action")
+        repair_prefix = "repair live state for file:"
+        if isinstance(next_action, str) and next_action.startswith(repair_prefix):
+            repair_path = next_action[len(repair_prefix) :]
+            matches = [
+                item
+                for item in artifacts
+                if isinstance(item, Mapping) and item.get("path") == repair_path
+            ]
+            if len(matches) != 1:
+                raise ControllerError("GOVERNED_ARTIFACT_NOT_FOUND")
+            return matches[0], True
+
+        pending = [
+            item
+            for item in artifacts
+            if isinstance(item, Mapping)
+            and isinstance(item.get("path"), str)
+            and _latest_receipt_for_path(manifest, str(item["path"])) is None
+        ]
+        if len(pending) != 1:
+            raise ControllerError(
+                "GOVERNED_ARTIFACT_NOT_FOUND"
+                if not pending
+                else "GOVERNED_ARTIFACT_AMBIGUOUS"
+            )
+        return pending[0], False
+
+    @staticmethod
+    def _baseline_state(manifest: MissionManifest, relpath: str) -> Mapping[str, Any]:
+        governed = manifest.continuity.get("governed_workspace")
+        entries = governed.get("baseline") if isinstance(governed, Mapping) else None
+        matches = [
+            entry
+            for entry in entries or []
+            if isinstance(entry, Mapping) and entry.get("path") == relpath
+        ]
+        if len(matches) != 1 or not isinstance(matches[0].get("state"), Mapping):
+            raise ControllerError("GOVERNED_WORKSPACE_INVALID")
+        return matches[0]["state"]
+
+    def manifest_dispatch(
+        self,
+        *,
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding(
+            "manifest_dispatch", _host_context_ref, _host_gate_ref
+        )
+        if binding.gate.lock_reason not in {
+            "explicit-manifest-intent",
+            "unfinished-durable-mission",
+            "unfinished-mission-integrity-error",
+        }:
+            raise ControllerError("HOST_GATE_UNAVAILABLE")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        artifact, repairing = self._artifact_for_dispatch(manifest)
+        relpath = artifact.get("path")
+        content = artifact.get("content")
+        if not isinstance(relpath, str) or not isinstance(content, str):
+            raise ControllerError("GOVERNED_ARTIFACT_INVALID")
+        if repairing:
+            try:
+                live = capture_baseline(binding.workspace_root, [relpath])
+            except GovernedWorkspaceError as error:
+                raise ControllerError(str(error)) from error
+            expected_state = live["baseline"][0]["state"]
+            action = str(manifest.state["next_action"])
+        else:
+            expected_state = self._baseline_state(manifest, relpath)
+            action = "write-text"
+        expected_before = _request_expected_before(expected_state)
+        store = self._store(binding.workspace_root, manifest.mission_id)
+        decision = coordinate_once(
+            manifest,
+            execution_request={
+                "capability_id": "filesystem-artifact",
+                "requested_permissions": ["repository:write"],
+                "requested_effects": [f"relpath:{relpath}", f"utf8:{content}"],
+                "estimated_costs": ["one local artifact write"],
+                "action": action,
+                "expected_before": expected_before,
+            },
+            checkpoint_store=store,
+        )
+        if decision.kind != "DISPATCH" or decision.request is None:
+            raise ControllerError(decision.reason)
+        adapter = FilesystemArtifactAdapter(
+            binding.workspace_root,
+            receipt_root=discovered.mission_dir / "receipts",
+            allowed_paths=tuple(
+                manifest.continuity["governed_workspace"]["paths"]
+            ),
+        )
+        try:
+            receipt = dispatch_once(manifest, decision, adapter)
+        except (CoordinationError, FilesystemArtifactError) as error:
+            raise ControllerError(str(error)) from error
+        if receipt.get("status") != "completed":
+            raise ControllerError(
+                f"FILESYSTEM_EFFECT_NOT_COMPLETED:{receipt.get('status')}"
+            )
+
+        recorded = apply_event_data(
+            manifest,
+            "record_execution_receipt",
+            MISSION_STEWARD_REF,
+            {"receipt": receipt, "request": decision.request},
+        )
+        store.save(recorded)
+        acted = apply_event_data(
+            recorded,
+            "record_action",
+            MISSION_STEWARD_REF,
+            {"action_ref": receipt["artifact_refs"][0]},
+        )
+        store.save(acted)
+        try:
+            verification = verify_filesystem_receipt(
+                str(receipt["external_receipt_ref"]),
+                decision.request,
+                binding.workspace_root,
+                receipt_root=discovered.mission_dir / "receipts",
+            )
+        except FilesystemArtifactError as error:
+            raise ControllerError(str(error)) from error
+        verified = apply_event_data(
+            acted,
+            "record_verifier_result",
+            "observer:artifact-verifier",
+            {"result": verification.to_dict()},
+        )
+        checkpoint = store.save(verified)
+        return {
+            "status": "dispatched",
+            **_status_summary(verified),
+            "mission_id": verified.mission_id,
+            "revision": verified.revision,
+            "mission_status": verified.state["status"],
+            "effect": deepcopy(receipt),
+            "observation": verification.to_dict(),
+            "checkpoint_ref": checkpoint.path,
+            "checkpoint_sha256": checkpoint.sha256,
+            "process_instance_id": self.process_instance_id,
+        }
+
+    def manifest_verify(
+        self,
+        *,
+        profile: str = "artifact-bindings",
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_verify", _host_context_ref, _host_gate_ref)
+        if profile != "artifact-bindings":
+            raise ControllerError("SANDBOXED_VERIFIER_UNAVAILABLE")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        definition = _durable_definition(manifest)
+        artifacts = definition.get("governed_artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise ControllerError("GOVERNED_ARTIFACT_NOT_FOUND")
+        store = self._store(binding.workspace_root, manifest.mission_id)
+        observations: list[dict[str, Any]] = []
+        for artifact in artifacts:
+            if not isinstance(artifact, Mapping) or not isinstance(
+                artifact.get("path"), str
+            ):
+                raise ControllerError("GOVERNED_ARTIFACT_INVALID")
+            relpath = str(artifact["path"])
+            receipt = _latest_receipt_for_path(manifest, relpath)
+            if receipt is None:
+                raise ControllerError("PROOF_BUNDLE_NOT_READY")
+            try:
+                observation = inspect_filesystem_receipt(
+                    str(receipt["external_receipt_ref"]),
+                    receipt["request"],
+                    binding.workspace_root,
+                    receipt_root=discovered.mission_dir / "receipts",
+                )
+            except FilesystemArtifactError as error:
+                raise ControllerError(str(error)) from error
+            observations.append(observation.to_dict())
+            if not _result_recorded(manifest, observation.result_ref):
+                manifest = apply_event_data(
+                    manifest,
+                    "record_verifier_result",
+                    "observer:artifact-verifier",
+                    {"result": observation.to_dict()},
+                )
+                store.save(manifest)
+            if observation.status != "verified":
+                latest = store.save(manifest)
+                return {
+                    "status": "contradicted",
+                    **_status_summary(manifest),
+                    "reason_code": observation.reason_code,
+                    "mission_id": manifest.mission_id,
+                    "revision": manifest.revision,
+                    "mission_status": manifest.state["status"],
+                    "next_action": manifest.state["next_action"],
+                    "observation": observation.to_dict(),
+                    "checkpoint_ref": latest.path,
+                    "checkpoint_sha256": latest.sha256,
+                    "process_instance_id": self.process_instance_id,
+                }
+
+        governed = manifest.continuity.get("governed_workspace")
+        try:
+            drift = find_unreceipted_drift(
+                binding.workspace_root,
+                governed,
+                manifest.continuity.get("execution_receipts", []),
+            )
+        except GovernedWorkspaceError as error:
+            raise ControllerError(str(error)) from error
+        if drift:
+            live = capture_baseline(
+                binding.workspace_root, [item.path for item in drift]
+            )
+            baseline_by_path = {
+                item["path"]: item
+                for item in governed["baseline"]
+                if isinstance(item, Mapping)
+            }
+            live_by_path = {
+                item["path"]: item
+                for item in live["baseline"]
+                if isinstance(item, Mapping)
+            }
+            manifest = apply_reconciliation_findings(
+                manifest,
+                [
+                    ReconciliationFinding(
+                        subject_ref=f"file:{item.path}",
+                        checkpoint_value=baseline_by_path[item.path],
+                        live_value=live_by_path[item.path],
+                        classification="CONTRADICTED",
+                    )
+                    for item in drift
+                ],
+            )
+            checkpoint = store.save(manifest)
+            return {
+                "status": "contradicted",
+                **_status_summary(manifest),
+                "reason_code": "UNRECEIPTED_WORKSPACE_DRIFT",
+                "mission_id": manifest.mission_id,
+                "revision": manifest.revision,
+                "mission_status": manifest.state["status"],
+                "next_action": manifest.state["next_action"],
+                "drift_findings": [
+                    {"path": item.path, "reason_code": item.reason_code}
+                    for item in drift
+                ],
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
+
+        if manifest.state.get("status") == "active":
+            try:
+                manifest = apply_event_data(
+                    manifest,
+                    "begin_verification",
+                    MISSION_STEWARD_REF,
+                    {},
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+        checkpoint = store.save(manifest)
+        return {
+            "status": "verified",
+            **_status_summary(manifest),
+            "mission_id": manifest.mission_id,
+            "revision": manifest.revision,
+            "mission_status": manifest.state["status"],
+            "next_action": manifest.state["next_action"],
+            "observations": observations,
+            "checkpoint_ref": checkpoint.path,
+            "checkpoint_sha256": checkpoint.sha256,
+            "process_instance_id": self.process_instance_id,
+        }
+
+    def manifest_accept(
+        self,
+        *,
+        acceptor_ref: str,
+        verdict: str,
+        separation_assurance: str,
+        principal_evidence_ref: str | None = None,
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_accept", _host_context_ref, _host_gate_ref)
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        verified_results = [
+            item
+            for item in manifest.continuity.get("verifier_results", [])
+            if isinstance(item, Mapping) and item.get("status") == "verified"
+        ]
+        evidence_refs = [
+            str(item["result_ref"])
+            for item in verified_results
+            if isinstance(item.get("result_ref"), str)
+        ]
+        evidence_refs.extend(
+            str(item["external_receipt_ref"])
+            for item in verified_results
+            if isinstance(item.get("external_receipt_ref"), str)
+        )
+        coverage_limits = [
+            "principal separation is not externally proven",
+            "declared roles and process separation are not distinct-principal evidence",
+        ]
+        try:
+            completed = apply_event_data(
+                manifest,
+                "accept",
+                acceptor_ref,
+                {
+                    "verdict": verdict,
+                    "evidence_refs": list(dict.fromkeys(evidence_refs)),
+                    "coverage_limits": coverage_limits,
+                    "separation_assurance": separation_assurance,
+                    "principal_evidence_ref": principal_evidence_ref,
+                },
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        checkpoint = self._store(
+            binding.workspace_root, completed.mission_id
+        ).save(completed)
+        return {
+            "status": "accepted",
+            **_status_summary(completed),
+            "mission_id": completed.mission_id,
+            "revision": completed.revision,
+            "mission_status": completed.state["status"],
+            "separation_assurance": separation_assurance,
+            "coverage_limits": coverage_limits,
+            "checkpoint_ref": checkpoint.path,
+            "checkpoint_sha256": checkpoint.sha256,
             "process_instance_id": self.process_instance_id,
         }
