@@ -94,6 +94,55 @@ class RepositoryContractTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
+    def test_public_content_checker_excludes_ignored_runtime_evidence(self) -> None:
+        generated = (
+            ROOT
+            / "missions"
+            / ".host-context"
+            / "test-public-content-ignore"
+            / "receipt.json"
+        )
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        fixture_email = "john" + "@example.com"
+        generated.write_text(
+            json.dumps({"prompt": fixture_email}) + "\n",
+            encoding="utf-8",
+        )
+        self.addCleanup(generated.unlink, missing_ok=True)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / ".github/scripts/check_public_content.py"),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+
+    def test_public_content_checker_includes_nonignored_untracked_content(self) -> None:
+        generated = ROOT / "public-content-untracked-probe.txt"
+        private_address = "192." + "168.50.10"
+        generated.write_text(private_address + "\n", encoding="utf-8")
+        self.addCleanup(generated.unlink, missing_ok=True)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / ".github/scripts/check_public_content.py"),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("public-content-untracked-probe.txt", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,8 +26,22 @@ ALLOWED_EMAILS = {"89846440+sternone@users.noreply.github.com"}
 
 
 def iter_text_files() -> list[Path]:
+    completed = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode == 0:
+        candidates = [
+            ROOT / raw.decode("utf-8", errors="surrogateescape")
+            for raw in completed.stdout.split(b"\0")
+            if raw
+        ]
+    else:
+        candidates = list(ROOT.rglob("*"))
     files: list[Path] = []
-    for path in ROOT.rglob("*"):
+    for path in candidates:
         if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
             continue
         if path.name in EXCLUDED_NAMES:
