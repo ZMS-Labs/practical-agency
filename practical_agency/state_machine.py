@@ -612,8 +612,35 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             "estimated_costs",
             "action",
         }
-        if set(request) != required_request_fields or request.get("schema") != "execution-request@1":
+        allowed_request_fields = required_request_fields | {"expected_before"}
+        if (
+            not required_request_fields.issubset(request)
+            or set(request) - allowed_request_fields
+            or request.get("schema") != "execution-request@1"
+        ):
             raise TransitionError("EXECUTION_RECEIPT_REQUEST_INVALID")
+        expected_before = request.get("expected_before")
+        if expected_before is not None:
+            valid_absent = (
+                isinstance(expected_before, Mapping)
+                and set(expected_before) == {"kind"}
+                and expected_before.get("kind") == "absent"
+            )
+            digest = (
+                expected_before.get("sha256")
+                if isinstance(expected_before, Mapping)
+                else None
+            )
+            valid_regular = (
+                isinstance(expected_before, Mapping)
+                and set(expected_before) == {"kind", "sha256"}
+                and expected_before.get("kind") == "regular-file"
+                and isinstance(digest, str)
+                and len(digest) == 64
+                and all(character in "0123456789abcdef" for character in digest)
+            )
+            if not (valid_absent or valid_regular):
+                raise TransitionError("EXECUTION_RECEIPT_REQUEST_INVALID")
         if receipt.get("schema") != "execution-receipt@1":
             raise TransitionError("EXECUTION_RECEIPT_SCHEMA")
         if (

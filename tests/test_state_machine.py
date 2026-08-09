@@ -371,6 +371,24 @@ class StateMachineTests(unittest.TestCase):
         self.assertEqual(stored["recorded_at_revision"], updated.revision)
         self.assertIn("artifact:receipt-proof", updated.continuity["durable_artifacts"])
 
+    def test_execution_receipt_persists_closed_expected_before_binding(self) -> None:
+        active = self.active()
+        request = self.execution_request(active.revision)
+        request["expected_before"] = {"kind": "absent"}
+        receipt = self.execution_receipt(request)
+
+        updated = apply_event_data(
+            active,
+            "record_execution_receipt",
+            "mission-steward",
+            {"receipt": receipt, "request": request},
+        )
+
+        self.assertEqual(
+            updated.continuity["execution_receipts"][-1]["request"]["expected_before"],
+            {"kind": "absent"},
+        )
+
     def test_execution_receipt_request_mismatch_is_refused(self) -> None:
         active = self.active()
         request = self.execution_request(active.revision)
