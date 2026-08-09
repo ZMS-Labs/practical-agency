@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CODEX_PLUGIN_ROOT}/hooks/manifest_hook.py\"",
+            "commandWindows": "python \"%CODEX_PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CODEX_PLUGIN_ROOT}/hooks/manifest_hook.py\"",
+            "commandWindows": "python \"%CODEX_PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
