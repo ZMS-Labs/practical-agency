@@ -111,32 +111,41 @@ def _definition_record(manifest: MissionManifest) -> Mapping[str, Any]:
 
 def _active_milestone_record(manifest: MissionManifest) -> Mapping[str, Any] | None:
     decisions = manifest.continuity.get("decisions", [])
-    accepted = {
+    closed = {
         item.get("authority_contract_sha256")
         for item in decisions
         if isinstance(item, Mapping)
         and item.get("kind") == "manifest-milestone-acceptance"
     }
+    closed.update(
+        item.get("superseded_authority_contract_sha256")
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-superseded"
+    )
     active = [
         item
         for item in decisions
         if isinstance(item, Mapping)
         and item.get("kind") == "manifest-milestone-definition"
-        and item.get("authority_contract_sha256") not in accepted
+        and item.get("authority_contract_sha256") not in closed
     ]
     if len(active) > 1:
         raise ControllerError("MANIFEST_MILESTONE_AMBIGUOUS")
     if not active:
         return None
     record = active[0]
-    if set(record) != {
+    required = {
         "kind",
         "authority_contract",
         "authority_contract_sha256",
         "governed_workspace",
         "return_frontier",
         "return_next_action",
-    }:
+    }
+    if not required.issubset(record) or set(record) - (
+        required | {"authorized_at_revision"}
+    ):
         raise ControllerError("AUTHORITY_CONTRACT_INVALID")
     contract = record.get("authority_contract")
     digest = record.get("authority_contract_sha256")
@@ -144,6 +153,13 @@ def _active_milestone_record(manifest: MissionManifest) -> Mapping[str, Any] | N
         not isinstance(contract, Mapping)
         or not isinstance(digest, str)
         or _canonical_sha256(contract) != digest
+    ):
+        raise ControllerError("AUTHORITY_CONTRACT_INVALID")
+    authorized_at = record.get("authorized_at_revision")
+    if authorized_at is not None and (
+        isinstance(authorized_at, bool)
+        or not isinstance(authorized_at, int)
+        or authorized_at < 1
     ):
         raise ControllerError("AUTHORITY_CONTRACT_INVALID")
     return record
@@ -202,7 +218,7 @@ def _durable_definition(manifest: MissionManifest) -> Mapping[str, Any]:
 
 
 def _latest_receipt_for_path(
-    manifest: MissionManifest, relpath: str
+    manifest: MissionManifest, relpath: str, *, min_revision: int = 0
 ) -> Mapping[str, Any] | None:
     proof_ref = f"file:{relpath}"
     for receipt in reversed(manifest.continuity.get("execution_receipts", [])):
@@ -212,9 +228,19 @@ def _latest_receipt_for_path(
             and proof_ref in receipt.get("artifact_refs", [])
             and isinstance(receipt.get("request"), Mapping)
             and isinstance(receipt.get("external_receipt_ref"), str)
+            and isinstance(receipt.get("mission_revision"), int)
+            and receipt.get("mission_revision") >= min_revision
         ):
             return receipt
     return None
+
+
+def _active_definition_receipt_floor(manifest: MissionManifest) -> int:
+    record = _active_milestone_record(manifest)
+    if record is None:
+        return 0
+    value = record.get("authorized_at_revision")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _result_recorded(manifest: MissionManifest, result_ref: str) -> bool:
@@ -321,13 +347,16 @@ class ManifestController:
             definition = _durable_definition(manifest)
         except ControllerError:
             definition = {}
+        receipt_floor = _active_definition_receipt_floor(manifest)
         artifacts = definition.get("governed_artifacts")
         if isinstance(artifacts, list):
             for artifact in artifacts:
                 relpath = artifact.get("path") if isinstance(artifact, Mapping) else None
                 if not isinstance(relpath, str):
                     continue
-                receipt = _latest_receipt_for_path(manifest, relpath)
+                receipt = _latest_receipt_for_path(
+                    manifest, relpath, min_revision=receipt_floor
+                )
                 if receipt is None:
                     continue
                 try:
@@ -528,11 +557,8 @@ class ManifestController:
                 if isinstance(item, Mapping)
                 and item.get("kind") == "manifest-definition"
             ]
-            if (
-                standard_records
-                or _active_milestone_record(manifest) is not None
-                or _pending_milestone_proposal(manifest) is not None
-            ):
+            active_milestone = _active_milestone_record(manifest)
+            if standard_records or _pending_milestone_proposal(manifest) is not None:
                 raise ControllerError(
                     f"MISSION_DEFINITION_ALREADY_EXISTS:{manifest.mission_id}"
                 )
@@ -542,16 +568,28 @@ class ManifestController:
                 "definition": deepcopy(normalized),
             }
             contract_hash = _canonical_sha256(contract)
+            supersedes = (
+                str(active_milestone["authority_contract_sha256"])
+                if active_milestone is not None
+                else None
+            )
+            if supersedes == contract_hash:
+                raise ControllerError(
+                    f"MISSION_DEFINITION_ALREADY_EXISTS:{manifest.mission_id}"
+                )
+            event_data = {
+                "authority_contract": contract,
+                "authority_contract_sha256": contract_hash,
+                "governed_workspace": baseline,
+            }
+            if supersedes is not None:
+                event_data["supersedes_authority_contract_sha256"] = supersedes
             try:
                 proposed = apply_event_data(
                     manifest,
                     "propose_manifest_milestone",
                     MISSION_STEWARD_REF,
-                    {
-                        "authority_contract": contract,
-                        "authority_contract_sha256": contract_hash,
-                        "governed_workspace": baseline,
-                    },
+                    event_data,
                 )
             except TransitionError as error:
                 raise ControllerError(str(error)) from error
@@ -559,7 +597,11 @@ class ManifestController:
                 binding.workspace_root, proposed.mission_id
             ).save(proposed)
             return {
-                "status": "definition-proposed",
+                "status": (
+                    "definition-revision-proposed"
+                    if supersedes is not None
+                    else "definition-proposed"
+                ),
                 **_status_summary(proposed),
                 "mission_id": proposed.mission_id,
                 "revision": proposed.revision,
@@ -784,6 +826,7 @@ class ManifestController:
         manifest: MissionManifest,
     ) -> tuple[Mapping[str, Any], bool]:
         definition = _durable_definition(manifest)
+        receipt_floor = _active_definition_receipt_floor(manifest)
         artifacts = definition.get("governed_artifacts")
         if not isinstance(artifacts, list) or not artifacts:
             raise ControllerError("GOVERNED_ARTIFACT_NOT_FOUND")
@@ -805,7 +848,12 @@ class ManifestController:
             for item in artifacts
             if isinstance(item, Mapping)
             and isinstance(item.get("path"), str)
-            and _latest_receipt_for_path(manifest, str(item["path"])) is None
+            and _latest_receipt_for_path(
+                manifest,
+                str(item["path"]),
+                min_revision=receipt_floor,
+            )
+            is None
         ]
         if len(pending) != 1:
             raise ControllerError(
@@ -948,6 +996,7 @@ class ManifestController:
         discovered = self._discover(binding.workspace_root)
         manifest = discovered.manifest
         definition = _durable_definition(manifest)
+        receipt_floor = _active_definition_receipt_floor(manifest)
         artifacts = definition.get("governed_artifacts")
         if not isinstance(artifacts, list) or not artifacts:
             raise ControllerError("GOVERNED_ARTIFACT_NOT_FOUND")
@@ -959,7 +1008,9 @@ class ManifestController:
             ):
                 raise ControllerError("GOVERNED_ARTIFACT_INVALID")
             relpath = str(artifact["path"])
-            receipt = _latest_receipt_for_path(manifest, relpath)
+            receipt = _latest_receipt_for_path(
+                manifest, relpath, min_revision=receipt_floor
+            )
             if receipt is None:
                 raise ControllerError("PROOF_BUNDLE_NOT_READY")
             try:
@@ -1113,10 +1164,20 @@ class ManifestController:
         binding = self._binding("manifest_accept", _host_context_ref, _host_gate_ref)
         discovered = self._discover(binding.workspace_root)
         manifest = discovered.manifest
+        receipt_floor = _active_definition_receipt_floor(manifest)
+        qualifying_request_ids = {
+            item.get("request_id")
+            for item in manifest.continuity.get("execution_receipts", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("mission_revision"), int)
+            and item.get("mission_revision") >= receipt_floor
+        }
         verified_results = [
             item
             for item in manifest.continuity.get("verifier_results", [])
-            if isinstance(item, Mapping) and item.get("status") == "verified"
+            if isinstance(item, Mapping)
+            and item.get("status") == "verified"
+            and item.get("request_id") in qualifying_request_ids
         ]
         evidence_refs = [
             str(item["result_ref"])

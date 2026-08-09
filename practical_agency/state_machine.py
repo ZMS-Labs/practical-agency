@@ -253,18 +253,24 @@ def _active_manifest_milestone_definition(
     continuity: Mapping[str, Any],
 ) -> Mapping[str, Any] | None:
     decisions = continuity.get("decisions", [])
-    accepted = {
+    closed = {
         item.get("authority_contract_sha256")
         for item in decisions
         if isinstance(item, Mapping)
         and item.get("kind") == "manifest-milestone-acceptance"
     }
+    closed.update(
+        item.get("superseded_authority_contract_sha256")
+        for item in decisions
+        if isinstance(item, Mapping)
+        and item.get("kind") == "manifest-milestone-superseded"
+    )
     active = [
         item
         for item in decisions
         if isinstance(item, Mapping)
         and item.get("kind") == "manifest-milestone-definition"
-        and item.get("authority_contract_sha256") not in accepted
+        and item.get("authority_contract_sha256") not in closed
     ]
     if len(active) > 1:
         raise TransitionError("MANIFEST_MILESTONE_AMBIGUOUS")
@@ -932,11 +938,14 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
 
     elif event.kind == "propose_manifest_milestone":
         _require_mission_steward(event)
-        if set(payload) != {
+        required_fields = {
             "authority_contract",
             "authority_contract_sha256",
             "governed_workspace",
-        }:
+        }
+        if not required_fields.issubset(payload) or set(payload) - (
+            required_fields | {"supersedes_authority_contract_sha256"}
+        ):
             raise TransitionError("MANIFEST_MILESTONE_PROPOSAL_INVALID")
         if any(
             isinstance(item, Mapping)
@@ -944,8 +953,19 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             for item in continuity.get("decisions", [])
         ):
             raise TransitionError("MISSION_DEFINITION_ALREADY_EXISTS")
-        if _active_manifest_milestone_definition(continuity) is not None:
-            raise TransitionError("MANIFEST_MILESTONE_ALREADY_ACTIVE")
+        active_definition = _active_manifest_milestone_definition(continuity)
+        supersedes = payload.get("supersedes_authority_contract_sha256")
+        if active_definition is None:
+            if supersedes is not None:
+                raise TransitionError("MANIFEST_MILESTONE_SUPERSESSION_MISMATCH")
+            return_frontier = list(state["current_frontier"])
+            return_next_action = state["next_action"]
+        else:
+            active_digest = active_definition.get("authority_contract_sha256")
+            if not isinstance(supersedes, str) or supersedes != active_digest:
+                raise TransitionError("MANIFEST_MILESTONE_SUPERSESSION_MISMATCH")
+            return_frontier = list(active_definition["return_frontier"])
+            return_next_action = active_definition["return_next_action"]
         unresolved_proposals = [
             item
             for item in continuity.get("decisions", [])
@@ -967,16 +987,17 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             payload.get("authority_contract_sha256"),
             payload.get("governed_workspace"),
         )
-        continuity["decisions"].append(
-            {
-                "kind": "manifest-milestone-proposal",
-                "authority_contract": deepcopy(dict(payload["authority_contract"])),
-                "authority_contract_sha256": digest,
-                "governed_workspace": deepcopy(dict(payload["governed_workspace"])),
-                "return_frontier": list(state["current_frontier"]),
-                "return_next_action": state["next_action"],
-            }
-        )
+        proposal_record = {
+            "kind": "manifest-milestone-proposal",
+            "authority_contract": deepcopy(dict(payload["authority_contract"])),
+            "authority_contract_sha256": digest,
+            "governed_workspace": deepcopy(dict(payload["governed_workspace"])),
+            "return_frontier": return_frontier,
+            "return_next_action": return_next_action,
+        }
+        if supersedes is not None:
+            proposal_record["supersedes_authority_contract_sha256"] = supersedes
+        continuity["decisions"].append(proposal_record)
 
     elif event.kind == "authorize_manifest_milestone":
         _operator_only(manifest, event)
@@ -1003,9 +1024,25 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             for item in continuity.get("decisions", [])
         ):
             raise TransitionError("MANIFEST_MILESTONE_ALREADY_AUTHORIZED")
-        if _active_manifest_milestone_definition(continuity) is not None:
-            raise TransitionError("MANIFEST_MILESTONE_ALREADY_ACTIVE")
         proposal = proposals[0]
+        active_definition = _active_manifest_milestone_definition(continuity)
+        supersedes = proposal.get("supersedes_authority_contract_sha256")
+        if active_definition is None:
+            if supersedes is not None:
+                raise TransitionError("MANIFEST_MILESTONE_SUPERSESSION_MISMATCH")
+        else:
+            active_digest = active_definition.get("authority_contract_sha256")
+            if not isinstance(supersedes, str) or supersedes != active_digest:
+                raise TransitionError("MANIFEST_MILESTONE_ALREADY_ACTIVE")
+            continuity["decisions"].append(
+                {
+                    "kind": "manifest-milestone-superseded",
+                    "superseded_authority_contract_sha256": supersedes,
+                    "replacement_authority_contract_sha256": digest,
+                    "actor_ref": event.actor_ref,
+                    "observed_at": event.observed_at,
+                }
+            )
         definition, _ = _validate_manifest_milestone_contract(
             manifest,
             proposal.get("authority_contract"),
@@ -1033,6 +1070,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 "governed_workspace": deepcopy(dict(proposal["governed_workspace"])),
                 "return_frontier": list(proposal["return_frontier"]),
                 "return_next_action": proposal["return_next_action"],
+                "authorized_at_revision": manifest.revision + 1,
             }
         )
         for artifact in definition["governed_artifacts"]:
@@ -1055,11 +1093,27 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             raise TransitionError("PASS_VERDICT_REQUIRED")
         evidence_refs, coverage_limits = _acceptance_evidence(payload)
         separation_assurance, principal_evidence_ref = _acceptance_assurance(payload)
+        authorized_at = definition_record.get("authorized_at_revision", 0)
+        if (
+            isinstance(authorized_at, bool)
+            or not isinstance(authorized_at, int)
+            or authorized_at < 0
+        ):
+            raise TransitionError("AUTHORITY_CONTRACT_INVALID")
+        qualifying_request_ids = {
+            item.get("request_id")
+            for item in continuity.get("execution_receipts", [])
+            if isinstance(item, Mapping)
+            and isinstance(item.get("mission_revision"), int)
+            and item.get("mission_revision") >= authorized_at
+        }
         latest_results: dict[str, VerifierResult] = {}
         for raw in continuity.get("verifier_results", []):
             try:
                 result = VerifierResult.from_dict(raw)
             except VerifierResultError:
+                continue
+            if result.request_id not in qualifying_request_ids:
                 continue
             latest_results[result.proof_ref] = result
         proof_refs = [

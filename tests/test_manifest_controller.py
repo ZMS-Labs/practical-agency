@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from practical_agency.checkpoint_store import FileCheckpointStore
@@ -387,6 +390,118 @@ class ManifestControllerEngagementTests(unittest.TestCase):
                 any(
                     item.get("kind") == "manifest-milestone-acceptance"
                     for item in latest.continuity["decisions"]
+                )
+            )
+
+    def test_receipted_milestone_intent_requires_approved_supersession(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = self._workspace(temp)
+            payload = minimal_payload()
+            payload["mission_id"] = "legacy-mission"
+            payload["state"] = {
+                "status": "active",
+                "completed_actions": [],
+                "current_frontier": ["continue broader mission"],
+                "blockers": [],
+                "next_action": "continue broader mission",
+            }
+            payload["continuity"]["prior_checkpoint"] = "fixture:legacy-r1"
+            FileCheckpointStore(
+                workspace / "missions" / "legacy-mission" / "checkpoints"
+            ).save(MissionManifest.from_dict(payload))
+            controller = ManifestController(plugin_root=ROOT)
+
+            mistaken = self._definition()
+            mistaken["governed_artifacts"][0]["content"] = "wrong approved bytes\n"
+            first = controller.manifest_define(
+                definition=mistaken,
+                **self._host_refs(
+                    workspace,
+                    "manifest_define",
+                    prompt="$manifest define the bounded milestone",
+                    turn="supersede-define-first",
+                ),
+            )
+            first_hash = str(first["authority_contract_sha256"])
+            controller.manifest_authorize(
+                authority_contract_sha256=first_hash,
+                **self._host_refs(
+                    workspace,
+                    "manifest_authorize",
+                    prompt=f"approve manifest {first_hash}",
+                    turn="supersede-authorize-first",
+                ),
+            )
+            first_dispatch = controller.manifest_dispatch(
+                **self._host_refs(
+                    workspace,
+                    "manifest_dispatch",
+                    prompt="dispatch the approved milestone",
+                    turn="supersede-dispatch-first",
+                )
+            )
+
+            corrected = deepcopy(mistaken)
+            corrected["instruction"] = "Correct the governed artifact bytes."
+            corrected["desired_state"] = "The corrected exact artifact exists."
+            corrected["governed_artifacts"][0]["content"] = "correct exact bytes\n"
+            proposed = controller.manifest_define(
+                definition=corrected,
+                **self._host_refs(
+                    workspace,
+                    "manifest_define",
+                    prompt="$manifest correct the approved milestone intent",
+                    turn="supersede-define-corrected",
+                ),
+            )
+
+            corrected_hash = str(proposed["authority_contract_sha256"])
+            self.assertEqual(proposed["status"], "definition-revision-proposed")
+            self.assertNotEqual(corrected_hash, first_hash)
+            target = workspace / "docs" / "operations" / "codex-manifest-alpha.md"
+            self.assertEqual(target.read_text(encoding="utf-8"), "wrong approved bytes\n")
+            controller.manifest_authorize(
+                authority_contract_sha256=corrected_hash,
+                **self._host_refs(
+                    workspace,
+                    "manifest_authorize",
+                    prompt=f"approve manifest {corrected_hash}",
+                    turn="supersede-authorize-corrected",
+                ),
+            )
+            corrected_dispatch = controller.manifest_dispatch(
+                **self._host_refs(
+                    workspace,
+                    "manifest_dispatch",
+                    prompt="dispatch the corrected milestone",
+                    turn="supersede-dispatch-corrected",
+                )
+            )
+
+            self.assertEqual(target.read_text(encoding="utf-8"), "correct exact bytes\n")
+            self.assertNotEqual(
+                corrected_dispatch["effect"]["request_id"],
+                first_dispatch["effect"]["request_id"],
+            )
+            external = json.loads(
+                Path(corrected_dispatch["effect"]["external_receipt_ref"]).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                external["before"]["sha256"],
+                hashlib.sha256(b"wrong approved bytes\n").hexdigest(),
+            )
+            decisions = discover_active_mission(workspace).manifest.continuity[
+                "decisions"
+            ]
+            self.assertTrue(
+                any(
+                    item.get("kind") == "manifest-milestone-superseded"
+                    and item.get("superseded_authority_contract_sha256") == first_hash
+                    and item.get("replacement_authority_contract_sha256")
+                    == corrected_hash
+                    for item in decisions
                 )
             )
 
