@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "python \"${PLUGIN_ROOT}/hooks/manifest_hook.py\"",
-            "commandWindows": "python \"%PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+            "commandWindows": "python \"$env:PLUGIN_ROOT\\hooks\\manifest_hook.py\""
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "python \"${PLUGIN_ROOT}/hooks/manifest_hook.py\"",
-            "commandWindows": "python \"%PLUGIN_ROOT%\\hooks\\manifest_hook.py\""
+            "commandWindows": "python \"$env:PLUGIN_ROOT\\hooks\\manifest_hook.py\""
           }
         ]
       }

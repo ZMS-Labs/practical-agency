@@ -118,7 +118,7 @@ class CodexPluginPackageTests(unittest.TestCase):
         self.assertTrue(handlers)
         for handler in handlers:
             self.assertIn("${PLUGIN_ROOT}", handler["command"])
-            self.assertIn("%PLUGIN_ROOT%", handler["commandWindows"])
+            self.assertIn("$env:PLUGIN_ROOT", handler["commandWindows"])
             self.assertNotIn("CODEX_PLUGIN_ROOT", json.dumps(handler))
 
     def test_copied_plugin_starts_without_source_working_directory(self) -> None:
