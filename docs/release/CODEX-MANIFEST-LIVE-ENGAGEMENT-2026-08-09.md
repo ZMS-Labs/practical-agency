@@ -15,7 +15,7 @@ bounded live-engagement milestone.
 
 ## Runtime and authority
 
-- Runtime implementation commit: `424658e5407d94d46629693bc10c26d40998168e`.
+- Runtime implementation commit: `0adfe94ac9b6ba1d7e0f27dd5e855311d33b1652`.
 - Source/installed runtime manifest: 36 files, SHA-256
   `7b1e7d7b3aed10f20624c162f237217b50c723aa5d9ad7584d261416f007b470`.
 - Trusted hook definition observed in fresh host receipts: SHA-256
