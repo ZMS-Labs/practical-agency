@@ -423,6 +423,13 @@
             "type": "object",
             "x-practical-agency-open": true
           }
+        },
+        "verifier_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "x-practical-agency-open": true
+          }
         }
       }
     },

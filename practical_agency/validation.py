@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from practical_agency.deferred_interest import validate_deferred_interest
 from practical_agency.manifest_model import MissionStatus
+from practical_agency.proof import VerifierResult, VerifierResultError
 
 MISSION_ID_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
@@ -82,6 +83,7 @@ OPTIONAL_OBJECT_FIELDS: dict[str, set[str]] = {
         "deferred_interests",
         "processed_event_ids",
         "execution_receipts",
+        "verifier_results",
     },
 }
 
@@ -116,6 +118,7 @@ LIST_FIELDS: dict[str, set[str]] = {
         "deferred_interests",
         "processed_event_ids",
         "execution_receipts",
+        "verifier_results",
     },
     "integrity": {"required_gates", "unresolved_verdicts"},
 }
@@ -284,10 +287,25 @@ def validate_manifest_dict(payload: Mapping[str, Any] | object) -> list[str]:
         "external_handoffs",
         "watch_commissions",
         "execution_receipts",
+        "verifier_results",
     ):
         if not _all_mappings(continuity.get(field, [])):
             errors.append(
                 f"INVALID_OBJECT_LIST: continuity.{field} must contain only objects"
+            )
+
+    for index, raw_result in enumerate(continuity.get("verifier_results", [])):
+        try:
+            result = VerifierResult.from_dict(raw_result)
+        except VerifierResultError as error:
+            errors.append(
+                f"VERIFIER_RESULT: continuity.verifier_results[{index}]: {error}"
+            )
+            continue
+        if result.mission_id != payload.get("mission_id"):
+            errors.append(
+                f"VERIFIER_RESULT: continuity.verifier_results[{index}]: "
+                "VERIFIER_RESULT_MISSION_MISMATCH"
             )
 
     deferred_interests = continuity.get("deferred_interests")

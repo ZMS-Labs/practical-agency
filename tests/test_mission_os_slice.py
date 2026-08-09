@@ -27,7 +27,9 @@ class MissionOsSliceTests(unittest.TestCase):
             "one local artifact write",
         ]
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
-        payload["outcome"]["completion_proof"] = ["artifact:validator-pass"]
+        payload["outcome"]["completion_proof"] = [
+            "file:mission-artifacts/os-slice.txt"
+        ]
         draft = MissionManifest.from_dict(payload)
 
         with tempfile.TemporaryDirectory() as temp:
@@ -103,15 +105,16 @@ class MissionOsSliceTests(unittest.TestCase):
                 recorded,
                 "record_action", "mission-steward", {"action_ref": result["artifact_refs"][0]},
             )
+            verification = verify_filesystem_receipt(
+                result["external_receipt_ref"],
+                decision.request,
+                world,
+            )
             observed = apply_event_data(
                 acted,
-                "record_observation", "observer:test", {
-                        "artifact_ref": "artifact:validator-pass",
-                        "fact": {
-                            "subject_ref": "artifact:os-slice",
-                            "value": "os-slice-body",
-                        },
-                    },
+                "record_verifier_result",
+                "observer:test",
+                {"result": verification.to_dict()},
             )
             ckpt = store.save(observed)
 
@@ -126,9 +129,9 @@ class MissionOsSliceTests(unittest.TestCase):
                 persisted_receipt["request"],
                 world,
             )
-            self.assertEqual(verified_receipt["state"], "committed")
+            self.assertEqual(verified_receipt.status, "verified")
             self.assertEqual(
-                verified_receipt["artifact_sha256"],
+                verified_receipt.observation["observed_sha256"],
                 persisted_receipt["observed_effects"][0]["sha256"],
             )
 
@@ -142,7 +145,9 @@ class MissionOsSliceTests(unittest.TestCase):
                     verifying,
                     "accept", "mission-steward", {
                             "verdict": "PASS",
-                            "evidence_refs": ["artifact:validator-pass"],
+                            "evidence_refs": [
+                                "file:mission-artifacts/os-slice.txt"
+                            ],
                             "coverage_limits": ["fixture slice"],
                         },
                 )
@@ -150,7 +155,9 @@ class MissionOsSliceTests(unittest.TestCase):
                 verifying,
                 "accept", "reviewer:test", {
                         "verdict": "PASS",
-                        "evidence_refs": ["artifact:validator-pass"],
+                        "evidence_refs": [
+                            "file:mission-artifacts/os-slice.txt"
+                        ],
                         "coverage_limits": [
                             "fixture slice only — NOT field v1 / RELEASE-1.0.0"
                         ],

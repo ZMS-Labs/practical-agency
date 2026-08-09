@@ -12,6 +12,7 @@ from practical_agency.coordinator import (
     CoordinationError,
     ReturnPoint,
     apply_capability_result,
+    consume_broker_grant,
     coordinate_once,
     dispatch_once,
     normalize_invocation_intent,
@@ -24,11 +25,18 @@ from tests.helpers import clone_payload, mission_os_event
 class MemoryAdapter:
     adapter_ref = "fixture://memory-adapter"
     capability_ids = ("fixture",)
+    broker_enforced = True
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+    def dispatch(
+        self,
+        request: dict[str, Any],
+        *,
+        broker_grant: object | None = None,
+    ) -> dict[str, Any]:
+        consume_broker_grant(broker_grant, request, self.adapter_ref)
         self.calls.append(request)
         return {
             "schema": "execution-receipt@1",

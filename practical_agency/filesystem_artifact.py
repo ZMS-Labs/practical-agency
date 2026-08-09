@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
+from practical_agency.coordinator import CoordinationError, consume_broker_grant
+from practical_agency.proof import VerifierResult
+
 _ADAPTER_REF = "filesystem-artifact@1"
 _RELPATH = re.compile(r"^relpath:(?P<path>.+)$")
 _UTF8 = re.compile(r"^utf8:(?P<body>.*)$", re.S)
@@ -98,6 +101,7 @@ class FilesystemArtifactAdapter:
 
     adapter_ref = _ADAPTER_REF
     capability_ids = ("filesystem-artifact",)
+    broker_enforced = True
 
     def __init__(
         self,
@@ -111,10 +115,17 @@ class FilesystemArtifactAdapter:
         self.root = Path(root).resolve()
         self.allowed_prefixes = tuple(allowed_prefixes)
         self.fail_at = fail_at
-        self.root.mkdir(parents=True, exist_ok=True)
-        (self.root / ".receipts").mkdir(parents=True, exist_ok=True)
 
-    def dispatch(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def dispatch(
+        self,
+        request: Mapping[str, Any],
+        *,
+        broker_grant: object | None = None,
+    ) -> dict[str, Any]:
+        try:
+            consume_broker_grant(broker_grant, request, self.adapter_ref)
+        except CoordinationError as error:
+            raise FilesystemArtifactError(str(error)) from error
         request_id = str(request.get("request_id") or "")
         mission_id = str(request.get("mission_id") or "")
         mission_revision = request.get("mission_revision")
@@ -137,13 +148,6 @@ class FilesystemArtifactAdapter:
             ],
         }
 
-        if action != "write-text":
-            return {
-                **base,
-                "status": "declined",
-                "coverage_limits": base["coverage_limits"]
-                + [f"unsupported action:{action!r}; no arbitrary shell"],
-            }
         if not isinstance(effects, list):
             return {
                 **base,
@@ -171,6 +175,14 @@ class FilesystemArtifactAdapter:
                 "coverage_limits": base["coverage_limits"]
                 + ["require relpath: and utf8: effects"],
             }
+        repair_action = f"repair live state for file:{relpath}"
+        if action not in {"write-text", repair_action}:
+            return {
+                **base,
+                "status": "declined",
+                "coverage_limits": base["coverage_limits"]
+                + [f"unsupported action:{action!r}; no arbitrary shell"],
+            }
         if (
             not _SAFE_RELPATH.fullmatch(relpath)
             or ".." in relpath.split("/")
@@ -193,6 +205,16 @@ class FilesystemArtifactAdapter:
                 "status": "blocked",
                 "coverage_limits": base["coverage_limits"] + ["path escape blocked"],
             }
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        receipts_dir = self.root / ".receipts"
+        if receipts_dir.is_symlink():
+            raise FilesystemArtifactError("RECEIPT_DIRECTORY_SYMLINK")
+        receipts_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            receipts_dir.resolve().relative_to(self.root)
+        except ValueError as error:
+            raise FilesystemArtifactError("RECEIPT_DIRECTORY_OUTSIDE_ROOT") from error
 
         data = body.encode("utf-8")
         digest = hashlib.sha256(data).hexdigest()
@@ -277,12 +299,12 @@ class FilesystemArtifactAdapter:
         }
 
 
-def verify_filesystem_receipt(
+def inspect_filesystem_receipt(
     external_receipt_ref: str,
     expected_request: Mapping[str, Any],
     root: Path,
-) -> dict[str, Any]:
-    """Verify receipt identity and recompute the observed artifact digest."""
+) -> VerifierResult:
+    """Return typed evidence from a receipt-bound live artifact observation."""
     root = Path(root).resolve()
     receipt = Path(external_receipt_ref).resolve()
     receipts_root = (root / ".receipts").resolve()
@@ -321,10 +343,62 @@ def verify_filesystem_receipt(
         expected_path.relative_to(root)
     except ValueError as error:
         raise FilesystemArtifactError("ARTIFACT_PATH_OUTSIDE_ROOT") from error
-    if Path(artifact_path).resolve() != expected_path or not expected_path.is_file():
+    if Path(artifact_path).resolve() != expected_path:
         raise FilesystemArtifactError("ARTIFACT_NOT_FOUND_OR_MISMATCH")
-    data = expected_path.read_bytes()
-    digest = hashlib.sha256(data).hexdigest()
-    if digest != body.get("artifact_sha256") or len(data) != body.get("bytes"):
-        raise FilesystemArtifactError("ARTIFACT_HASH_MISMATCH")
-    return deepcopy(body)
+    if expected_path.is_file():
+        data = expected_path.read_bytes()
+        digest: str | None = hashlib.sha256(data).hexdigest()
+        observed_bytes: int | None = len(data)
+        if digest == body.get("artifact_sha256") and observed_bytes == body.get("bytes"):
+            status = "verified"
+            reason_code = None
+        else:
+            status = "contradicted"
+            reason_code = "ARTIFACT_HASH_MISMATCH"
+    else:
+        digest = None
+        observed_bytes = None
+        status = "unverified"
+        reason_code = "ARTIFACT_NOT_FOUND_OR_MISMATCH"
+
+    proof_ref = f"file:{relpath}"
+    execution_receipt = _completed_receipt_from_journal(body, receipt)
+    return VerifierResult.bind(
+        verifier_ref="filesystem-artifact-verifier@1",
+        status=status,
+        proof_ref=proof_ref,
+        subject_ref=proof_ref,
+        request=expected_request,
+        receipt=execution_receipt,
+        observation={
+            "kind": "filesystem-artifact-observation",
+            "artifact_ref": proof_ref,
+            "relpath": relpath,
+            "expected_sha256": body.get("artifact_sha256"),
+            "observed_sha256": digest,
+            "expected_bytes": body.get("bytes"),
+            "observed_bytes": observed_bytes,
+        },
+        reason_code=reason_code,
+        coverage_limits=(
+            "filesystem-artifact-verifier@1 observes one receipt-bound local file",
+            "receipt and artifact bytes are local to the configured adapter root",
+        ),
+    )
+
+
+def verify_filesystem_receipt(
+    external_receipt_ref: str,
+    expected_request: Mapping[str, Any],
+    root: Path,
+) -> VerifierResult:
+    """Return typed verified evidence or fail closed with its reason code."""
+
+    result = inspect_filesystem_receipt(
+        external_receipt_ref,
+        expected_request,
+        root,
+    )
+    if result.status != "verified":
+        raise FilesystemArtifactError(result.reason_code or "ARTIFACT_NOT_VERIFIED")
+    return result

@@ -12,8 +12,13 @@ from practical_agency.checkpoint_store import (
     apply_reconciliation_findings,
     reconcile_observations,
 )
-from practical_agency.coordinator import coordinate_once, dispatch_once
+from practical_agency.coordinator import (
+    consume_broker_grant,
+    coordinate_once,
+    dispatch_once,
+)
 from practical_agency.manifest_model import MissionManifest
+from practical_agency.proof import VerifierResult
 from practical_agency.state_machine import TransitionError, apply_event_data
 from tests.helpers import clone_payload, mission_os_event
 
@@ -21,11 +26,18 @@ from tests.helpers import clone_payload, mission_os_event
 class MemoryAdapter:
     adapter_ref = "memory:test"
     capability_ids = ("fixture-writer",)
+    broker_enforced = True
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+    def dispatch(
+        self,
+        request: dict[str, Any],
+        *,
+        broker_grant: object | None = None,
+    ) -> dict[str, Any]:
+        consume_broker_grant(broker_grant, request, self.adapter_ref)
         self.calls.append(request)
         call = len(self.calls)
         return {
@@ -35,7 +47,7 @@ class MemoryAdapter:
             "mission_revision": request["mission_revision"],
             "adapter_ref": "memory:test",
             "status": "completed",
-            "artifact_refs": [f"artifact:call-{call}"],
+            "artifact_refs": ["artifact:validator-pass"],
             "observed_effects": request.get("requested_effects", []),
             "external_receipt_ref": f"memory://receipt/{call}",
             "coverage_limits": ["in-memory fixture only"],
@@ -107,15 +119,26 @@ class EndToEndMissionTests(unittest.TestCase):
                 "record_action", "mission-steward", {"action_ref": result["artifact_refs"][0]},
             )
             artifact_hash = hashlib.sha256(b"canonical artifact").hexdigest()
+            verification = VerifierResult.bind(
+                verifier_ref="fixture-verifier@1",
+                status="verified",
+                proof_ref="artifact:validator-pass",
+                subject_ref="artifact:canonical",
+                request=decision.request,
+                receipt=result,
+                observation={
+                    "kind": "fixture-artifact-observation",
+                    "artifact_ref": "artifact:validator-pass",
+                    "observed_sha256": artifact_hash,
+                },
+                reason_code=None,
+                coverage_limits=("in-memory fixture only",),
+            )
             observed = apply_event_data(
                 acted,
-                "record_observation", "observer:test", {
-                        "artifact_ref": "artifact:validator-pass",
-                        "fact": {
-                            "subject_ref": "artifact:canonical",
-                            "value": artifact_hash,
-                        },
-                    },
+                "record_verifier_result",
+                "observer:test",
+                {"result": verification.to_dict()},
             )
             checkpoint = store.save(observed)
 
@@ -155,23 +178,40 @@ class EndToEndMissionTests(unittest.TestCase):
             correction_result = dispatch_once(reopened, correction, adapter)
             corrected = apply_event_data(
                 reopened,
+                "record_execution_receipt",
+                "mission-steward",
+                {"receipt": correction_result, "request": correction.request},
+            )
+            corrected = apply_event_data(
+                corrected,
                 "record_action", "mission-steward", {"action_ref": correction_result["artifact_refs"][0]},
             )
-            self.assertNotIn(
-                "artifact:validator-pass",
-                corrected.continuity["durable_artifacts"],
+            self.assertEqual(
+                corrected.continuity["verifier_results"],
+                [],
             )
 
             repaired_hash = hashlib.sha256(b"repaired canonical artifact").hexdigest()
+            repair_verification = VerifierResult.bind(
+                verifier_ref="fixture-verifier@1",
+                status="verified",
+                proof_ref="artifact:validator-pass",
+                subject_ref="artifact:canonical",
+                request=correction.request,
+                receipt=correction_result,
+                observation={
+                    "kind": "fixture-artifact-observation",
+                    "artifact_ref": "artifact:validator-pass",
+                    "observed_sha256": repaired_hash,
+                },
+                reason_code=None,
+                coverage_limits=("in-memory fixture only",),
+            )
             reobserved = apply_event_data(
                 corrected,
-                "record_observation", "observer:test", {
-                        "artifact_ref": "artifact:validator-pass",
-                        "fact": {
-                            "subject_ref": "artifact:canonical",
-                            "value": repaired_hash,
-                        },
-                    },
+                "record_verifier_result",
+                "observer:test",
+                {"result": repair_verification.to_dict()},
             )
             self.assertEqual(reobserved.state["blockers"], [])
             self.assertEqual(reobserved.integrity["unresolved_verdicts"], [])

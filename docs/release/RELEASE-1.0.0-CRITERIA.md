@@ -8,7 +8,7 @@ the exact commit.
 Claim surface: **first operator-useful major**. Authorized intent can be
 installed in a declared harness, advanced through at least one bounded adapter
 that emits an external durable receipt, resumed after interruption from
-checkpoints, and closed only by an independent acceptor.
+checkpoints, and closed only through independently evaluated acceptance.
 
 See [VERSIONING.md](VERSIONING.md) for the `0.1.0` vs `1.0.0` ladder.
 
@@ -47,32 +47,49 @@ test.
 At least one adapter that:
 
 - performs a consequential authorized effect outside pure in-process fixtures;
-- does **not** run arbitrary shell commands by default;
-- returns an **external durable receipt** (hashable artifact, store object, or
-  equivalent) that the checkpoint can reference;
+- is reachable only through the coordinator's request-bound, one-use dispatch
+  grant and rejects direct invocation;
+- does **not** run arbitrary shell commands or generic executables by default;
+- returns an **external durable receipt** that names the observed artifact and
+  can be verified independently;
+- records a typed verifier result bound to the mission, request, adapter,
+  artifact, observation, and receipt rather than treating a string reference as
+  proof; and
 - fails closed into visible `BLOCKED` when the substrate is unavailable.
 
-In-memory or unittest-only adapters do **not** satisfy this gate.
+In-memory or unittest-only adapters do **not** satisfy this gate. An allowlist of
+Python, npm, git, or similar general executables is not a sandbox. Such execution
+requires a real OS or container boundary with explicit resource, filesystem,
+network, environment, executable, and argument policy.
 
 ### 3. End-to-end operator mission proof
 
-One recorded proof (not only `tests/test_end_to_end_mission.py`) that:
+One recorded proof, outside a single in-memory test process, that:
 
 1. creates a draft mission from verbatim operator intent;
 2. approves it under recorded authority;
-3. discovers capabilities dynamically (no copied inventory);
-4. dispatches one authorized action through the qualifying adapter;
-5. records the observed external receipt;
+3. lets a new process discover the unique active mission from a workspace root
+   without receiving the mission id or directory;
+4. dispatches one authorized action through the qualifying broker and adapter;
+5. records the observed external receipt and a typed verifier result;
 6. checkpoints revision N;
-7. discards session memory / restarts or opens a new session;
-8. loads revision N and re-anchors to live artifacts;
-9. injects or observes a live-state contradiction and reopens as required;
-10. dispatches a corrective authorized action when needed;
+7. terminates the acting process without handing in-memory mission state to its
+   successor;
+8. lets another process discover and load revision N from durable storage;
+9. injects or observes a live-state contradiction and persists the reopened
+   state;
+10. dispatches a corrective authorized action through the same broker boundary;
 11. enters `verifying` without self-completion;
-12. rejects steward self-acceptance;
-13. accepts through the declared independent acceptor (`PASS`);
-14. loads the final `completed` checkpoint with the original operator
-    instruction unchanged.
+12. lets a third process independently re-observe the final artifact and receipt;
+13. rejects steward self-acceptance;
+14. accepts through a distinct principal with evidence, or explicitly records
+    the weaker `declared-role-separation` assurance; and
+15. loads the final `completed` checkpoint with the original operator
+    instruction unchanged and the external receipt still valid.
+
+The proof must state its exact source commit or exact tested-tree fingerprint.
+An executable process test may establish the mechanism; a release claim still
+needs retained evidence against the immutable candidate commit.
 
 ### 4. Commission-watch honesty
 
@@ -103,7 +120,7 @@ under a later version:
 - independent ends for the agent
 - universal or comparative efficacy vs ordinary skilled agents
 - automatic `watch` → `manifest` routing without installation and admitted intake
-- unrestricted shell as default execution
+- unrestricted shell or generic executable execution as a default adapter
 - multi-provider monitoring matrix
 
 Comparative efficacy is a later evidence program, not a `1.0.0` honesty
@@ -130,5 +147,8 @@ When a candidate exists, fill:
 - Treating confirmer PASS on a `0.1` kernel candidate as `1.0.0` readiness
 - Retagging or renaming `0.1.0` to manufacture a major
 - Counting fixture adapters as production-capable
+- Presenting process separation as proof of distinct OS or organizational principals
+- Accepting receipt-reference strings as verified observations
+- Calling an executable allowlist a sandbox
 - Implying comparative efficacy from the major bump alone
 - Self-certifying material completion of the release mission

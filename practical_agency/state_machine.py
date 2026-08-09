@@ -16,6 +16,11 @@ from practical_agency.mission_os import (
     frontier_sha256,
     validate_basis_refs,
 )
+from practical_agency.proof import (
+    VerifierResult,
+    VerifierResultError,
+    canonical_request_sha256,
+)
 
 
 class TransitionError(RuntimeError):
@@ -135,6 +140,11 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.COMPLETED.value,
     },
     "record_execution_receipt": {MissionStatus.ACTIVE.value},
+    "record_verifier_result": {
+        MissionStatus.ACTIVE.value,
+        MissionStatus.BLOCKED.value,
+        MissionStatus.VERIFYING.value,
+    },
     "amend_authority": {
         MissionStatus.DRAFT.value,
         MissionStatus.ACTIVE.value,
@@ -202,15 +212,24 @@ def _require_independent_acceptor(
         raise TransitionError("INDEPENDENT_ACCEPTANCE_REQUIRED")
 
 
-def _required_proof_refs(data: Mapping[str, Any]) -> list[str]:
-    return list(data["outcome"]["completion_proof"]) + list(
-        data["integrity"]["required_gates"]
-    )
-
-
 def _missing_proof_refs(data: Mapping[str, Any]) -> list[str]:
+    latest: dict[str, VerifierResult] = {}
+    for raw in data["continuity"].get("verifier_results", []):
+        try:
+            result = VerifierResult.from_dict(raw)
+        except VerifierResultError:
+            continue
+        latest[result.proof_ref] = result
+    missing = [
+        ref
+        for ref in data["outcome"]["completion_proof"]
+        if ref not in latest or latest[ref].status != "verified"
+    ]
     present = set(data["continuity"]["durable_artifacts"])
-    return [ref for ref in _required_proof_refs(data) if ref not in present]
+    missing.extend(
+        ref for ref in data["integrity"]["required_gates"] if ref not in present
+    )
+    return missing
 
 
 def _acceptance_evidence(payload: Mapping[str, Any]) -> tuple[list[str], list[str]]:
@@ -221,6 +240,32 @@ def _acceptance_evidence(payload: Mapping[str, Any]) -> tuple[list[str], list[st
         payload, "coverage_limits", "ACCEPTANCE_COVERAGE_LIMITS_REQUIRED"
     )
     return evidence_refs, coverage_limits
+
+
+def _acceptance_assurance(
+    payload: Mapping[str, Any],
+) -> tuple[str, str | None]:
+    assurance = payload.get(
+        "separation_assurance",
+        "declared-role-separation",
+    )
+    if assurance not in {"declared-role-separation", "externally-proven"}:
+        raise TransitionError("ACCEPTANCE_SEPARATION_ASSURANCE_INVALID")
+    principal_evidence_ref = payload.get("principal_evidence_ref")
+    if assurance == "externally-proven":
+        if not isinstance(principal_evidence_ref, str) or not principal_evidence_ref.strip():
+            raise TransitionError("ACCEPTANCE_PRINCIPAL_EVIDENCE_REQUIRED")
+        raise TransitionError("ACCEPTANCE_PRINCIPAL_VERIFIER_UNAVAILABLE")
+    if principal_evidence_ref is not None and (
+        not isinstance(principal_evidence_ref, str)
+        or not principal_evidence_ref.strip()
+    ):
+        raise TransitionError("ACCEPTANCE_PRINCIPAL_EVIDENCE_INVALID")
+    return assurance, (
+        principal_evidence_ref
+        if isinstance(principal_evidence_ref, str)
+        else None
+    )
 
 
 def _reconciliation_subject(marker: object) -> str | None:
@@ -277,6 +322,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
     continuity = data["continuity"]
     continuity.setdefault("processed_event_ids", [])
     continuity.setdefault("execution_receipts", [])
+    continuity.setdefault("verifier_results", [])
     integrity = data["integrity"]
 
     if event.kind == "approve":
@@ -353,6 +399,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         if payload.get("verdict") != "PASS":
             raise TransitionError("PASS_VERDICT_REQUIRED")
         evidence_refs, coverage_limits = _acceptance_evidence(payload)
+        separation_assurance, principal_evidence_ref = _acceptance_assurance(payload)
         if integrity["unresolved_verdicts"]:
             raise TransitionError("UNRESOLVED_VERDICTS")
         missing = _missing_proof_refs(data)
@@ -363,11 +410,13 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         state["next_action"] = None
         continuity["decisions"].append(
             {
-                "kind": "independent-acceptance",
+                "kind": "completion-acceptance",
                 "actor_ref": event.actor_ref,
                 "verdict": "PASS",
                 "evidence_refs": evidence_refs,
                 "coverage_limits": coverage_limits,
+                "separation_assurance": separation_assurance,
+                "principal_evidence_ref": principal_evidence_ref,
             }
         )
 
@@ -378,6 +427,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             raise TransitionError("REJECTION_VERDICT_REQUIRED")
         reason = _required_string(payload, "reason", "REJECTION_REASON_REQUIRED")
         evidence_refs, coverage_limits = _acceptance_evidence(payload)
+        separation_assurance, principal_evidence_ref = _acceptance_assurance(payload)
         unresolved = f"{verdict}:{reason}"
         _append_unique(integrity["unresolved_verdicts"], unresolved)
         _append_unique(state["blockers"], unresolved)
@@ -389,12 +439,14 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         state["next_action"] = f"address verdict: {unresolved}"
         continuity["decisions"].append(
             {
-                "kind": "independent-rejection",
+                "kind": "completion-rejection",
                 "actor_ref": event.actor_ref,
                 "verdict": verdict,
                 "reason": reason,
                 "evidence_refs": evidence_refs,
                 "coverage_limits": coverage_limits,
+                "separation_assurance": separation_assurance,
+                "principal_evidence_ref": principal_evidence_ref,
             }
         )
 
@@ -607,6 +659,117 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         continuity["execution_receipts"].append(stored_receipt)
         for artifact_ref in artifact_refs:
             _append_unique(continuity["durable_artifacts"], artifact_ref)
+
+    elif event.kind == "record_verifier_result":
+        if set(payload) != {"result"}:
+            raise TransitionError("VERIFIER_RESULT_EVENT_INVALID")
+        raw_result = payload.get("result")
+        if not isinstance(raw_result, Mapping):
+            raise TransitionError("VERIFIER_RESULT_REQUIRED")
+        try:
+            result = VerifierResult.from_dict(raw_result)
+        except VerifierResultError as error:
+            raise TransitionError(str(error)) from error
+        if result.mission_id != manifest.mission_id:
+            raise TransitionError("VERIFIER_RESULT_MISSION_MISMATCH")
+        matches = [
+            item
+            for item in continuity.get("execution_receipts", [])
+            if isinstance(item, Mapping)
+            and item.get("request_id") == result.request_id
+        ]
+        if len(matches) != 1:
+            raise TransitionError("VERIFIER_RESULT_EXECUTION_RECEIPT_REQUIRED")
+        execution_receipt = matches[0]
+        if execution_receipt.get("status") != "completed":
+            raise TransitionError("VERIFIER_RESULT_EXECUTION_NOT_COMPLETED")
+        stored_request = execution_receipt.get("request")
+        if not isinstance(stored_request, Mapping):
+            raise TransitionError("VERIFIER_RESULT_REQUEST_REQUIRED")
+        if (
+            execution_receipt.get("mission_id") != result.mission_id
+            or execution_receipt.get("mission_revision") != result.mission_revision
+            or execution_receipt.get("adapter_ref") != result.adapter_ref
+            or execution_receipt.get("external_receipt_ref")
+            != result.external_receipt_ref
+            or canonical_request_sha256(stored_request) != result.request_sha256
+            or result.proof_ref not in execution_receipt.get("artifact_refs", [])
+        ):
+            raise TransitionError("VERIFIER_RESULT_RECEIPT_BINDING_MISMATCH")
+        if any(
+            isinstance(item, Mapping)
+            and item.get("result_ref") == result.result_ref
+            for item in continuity["verifier_results"]
+        ):
+            raise TransitionError("VERIFIER_RESULT_REPLAY")
+
+        continuity["verifier_results"].append(result.to_dict())
+        _append_unique(continuity["durable_artifacts"], result.result_ref)
+        data["truth"]["verified_facts"] = [
+            item
+            for item in data["truth"]["verified_facts"]
+            if not (
+                isinstance(item, Mapping)
+                and item.get("subject_ref") == result.subject_ref
+            )
+        ]
+
+        if result.status == "verified":
+            data["truth"]["verified_facts"].append(
+                {
+                    "subject_ref": result.subject_ref,
+                    "value": deepcopy(dict(result.observation)),
+                }
+            )
+            for field_name in ("contradictions", "unknowns"):
+                data["truth"][field_name] = [
+                    item
+                    for item in data["truth"][field_name]
+                    if not (
+                        isinstance(item, Mapping)
+                        and item.get("subject_ref") == result.subject_ref
+                    )
+                ]
+            state["blockers"] = [
+                marker
+                for marker in state["blockers"]
+                if _reconciliation_subject(marker) != result.subject_ref
+            ]
+            integrity["unresolved_verdicts"] = [
+                marker
+                for marker in integrity["unresolved_verdicts"]
+                if _reconciliation_subject(marker) != result.subject_ref
+            ]
+            if current == MissionStatus.BLOCKED.value and not (
+                state["blockers"] or integrity["unresolved_verdicts"]
+            ):
+                state["status"] = MissionStatus.ACTIVE.value
+            if current != MissionStatus.VERIFYING.value:
+                state["next_action"] = (
+                    state["current_frontier"][0]
+                    if state["current_frontier"]
+                    else "resume mission"
+                )
+        else:
+            field_name = (
+                "contradictions"
+                if result.status == "contradicted"
+                else "unknowns"
+            )
+            evidence = {
+                "subject_ref": result.subject_ref,
+                "result_ref": result.result_ref,
+                "status": result.status,
+                "reason_code": result.reason_code,
+            }
+            _append_unique(data["truth"][field_name], evidence)
+            marker = (
+                f"RECONCILIATION:{result.status.upper()}:{result.subject_ref}"
+            )
+            _append_unique(state["blockers"], marker)
+            _append_unique(integrity["unresolved_verdicts"], marker)
+            state["status"] = MissionStatus.ACTIVE.value
+            state["next_action"] = f"repair live state for {result.subject_ref}"
 
     elif event.kind == "amend_authority":
         _operator_only(manifest, event)

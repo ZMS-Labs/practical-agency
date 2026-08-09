@@ -4,13 +4,14 @@ import unittest
 from dataclasses import replace
 
 from practical_agency.manifest_model import MissionManifest
+from practical_agency.proof import VerifierResult
 from practical_agency.state_machine import (
     MissionEvent,
     TransitionError,
     apply_event,
     apply_event_data,
 )
-from tests.helpers import clone_payload
+from tests.helpers import clone_payload, record_fixture_verifier_result
 
 
 class StateMachineTests(unittest.TestCase):
@@ -24,13 +25,7 @@ class StateMachineTests(unittest.TestCase):
         )
 
     def observed(self, manifest: MissionManifest) -> MissionManifest:
-        return apply_event_data(
-            manifest,
-            "record_observation", "observer:test", {
-                    "artifact_ref": "artifact:validator-pass",
-                    "fact": {"subject_ref": "repo:example@rev-1", "value": "validated"},
-                },
-        )
+        return record_fixture_verifier_result(manifest)
 
     def verdict(self, verdict: str, **extra: object) -> dict[str, object]:
         return {
@@ -89,16 +84,154 @@ class StateMachineTests(unittest.TestCase):
             completed.continuity["decisions"][-1]["evidence_refs"],
             ["artifact:independent-review"],
         )
+        self.assertEqual(
+            completed.continuity["decisions"][-1]["separation_assurance"],
+            "declared-role-separation",
+        )
+        self.assertIsNone(
+            completed.continuity["decisions"][-1]["principal_evidence_ref"]
+        )
 
-    def test_begin_verification_requires_all_completion_proof_refs(self) -> None:
+    def test_externally_proven_acceptance_requires_principal_evidence(self) -> None:
+        payload = clone_payload()
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        active = apply_event_data(
+            MissionManifest.from_dict(payload),
+            "approve",
+            "operator:test",
+            {"checkpoint_ref": "checkpoint:1"},
+        )
+        verifying = apply_event_data(
+            self.observed(active),
+            "begin_verification",
+            "mission-steward",
+            {},
+        )
+        with self.assertRaisesRegex(
+            TransitionError,
+            "ACCEPTANCE_PRINCIPAL_EVIDENCE_REQUIRED",
+        ):
+            apply_event_data(
+                verifying,
+                "accept",
+                "reviewer:test",
+                self.verdict(
+                    "PASS",
+                    separation_assurance="externally-proven",
+                ),
+            )
+
+    def test_externally_proven_acceptance_rejects_unverified_principal_reference(self) -> None:
+        payload = clone_payload()
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        active = apply_event_data(
+            MissionManifest.from_dict(payload),
+            "approve",
+            "operator:test",
+            {"checkpoint_ref": "checkpoint:1"},
+        )
+        verifying = apply_event_data(
+            self.observed(active),
+            "begin_verification",
+            "mission-steward",
+            {},
+        )
+
+        with self.assertRaisesRegex(
+            TransitionError,
+            "ACCEPTANCE_PRINCIPAL_VERIFIER_UNAVAILABLE",
+        ):
+            apply_event_data(
+                verifying,
+                "accept",
+                "reviewer:test",
+                self.verdict(
+                    "PASS",
+                    separation_assurance="externally-proven",
+                    principal_evidence_ref="principal-evidence:unverified-string",
+                ),
+            )
+
+    def test_begin_verification_rejects_string_only_completion_proof(self) -> None:
         payload = clone_payload()
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         active = apply_event_data(
             MissionManifest.from_dict(payload),
             "approve", "operator:test", {"checkpoint_ref": "checkpoint:1"},
         )
+        string_only = apply_event_data(
+            active,
+            "record_observation",
+            "observer:test",
+            {
+                "artifact_ref": "artifact:validator-pass",
+                "fact": {
+                    "subject_ref": "repo:example@rev-1",
+                    "value": "validated",
+                },
+            },
+        )
         with self.assertRaisesRegex(TransitionError, "PROOF_BUNDLE_NOT_READY"):
-            apply_event_data(active, "begin_verification", "mission-steward", {})
+            apply_event_data(
+                string_only,
+                "begin_verification",
+                "mission-steward",
+                {},
+            )
+
+    def test_typed_verifier_result_bound_to_receipt_satisfies_completion_proof(self) -> None:
+        payload = clone_payload()
+        payload["integrity"]["completion_acceptor"] = "reviewer:test"
+        payload["outcome"]["completion_proof"] = ["artifact:receipt-proof"]
+        active = apply_event_data(
+            MissionManifest.from_dict(payload),
+            "approve",
+            "operator:test",
+            {"checkpoint_ref": "checkpoint:1"},
+        )
+        request = self.execution_request(active.revision)
+        receipt = self.execution_receipt(request)
+        recorded = apply_event_data(
+            active,
+            "record_execution_receipt",
+            "mission-steward",
+            {"receipt": receipt, "request": request},
+        )
+        verification = VerifierResult.bind(
+            verifier_ref="fixture-verifier@1",
+            status="verified",
+            proof_ref="artifact:receipt-proof",
+            subject_ref="artifact:receipt-proof",
+            request=request,
+            receipt=receipt,
+            observation={
+                "kind": "fixture-observation",
+                "artifact_ref": "artifact:receipt-proof",
+                "value": "validated",
+            },
+            reason_code=None,
+            coverage_limits=("fixture verifier only",),
+        )
+
+        ready = apply_event_data(
+            recorded,
+            "record_verifier_result",
+            "observer:test",
+            {"result": verification.to_dict()},
+        )
+
+        self.assertEqual(
+            ready.continuity["verifier_results"][-1]["schema"],
+            "verifier-result@1",
+        )
+        self.assertIn(verification.result_ref, ready.continuity["durable_artifacts"])
+        verifying = apply_event_data(
+            ready,
+            "begin_verification",
+            "mission-steward",
+            {},
+        )
+        self.assertEqual(verifying.state["status"], "verifying")
 
     def test_reject_cannot_be_rewritten_as_completion(self) -> None:
         payload = clone_payload()
@@ -270,6 +403,43 @@ class StateMachineTests(unittest.TestCase):
                 "record_execution_receipt",
                 "mission-steward",
                 {"receipt": replay_receipt, "request": replay_request},
+            )
+
+    def test_verifier_result_cannot_bind_to_declined_execution(self) -> None:
+        active = self.active()
+        request = self.execution_request(active.revision)
+        receipt = self.execution_receipt(request)
+        receipt["status"] = "declined"
+        recorded = apply_event_data(
+            active,
+            "record_execution_receipt",
+            "mission-steward",
+            {"receipt": receipt, "request": request},
+        )
+        result = VerifierResult.bind(
+            verifier_ref="fixture-verifier@1",
+            status="verified",
+            proof_ref="artifact:receipt-proof",
+            subject_ref="artifact:receipt-proof",
+            request=request,
+            receipt=receipt,
+            observation={
+                "kind": "fixture-observation",
+                "artifact_ref": "artifact:receipt-proof",
+            },
+            reason_code=None,
+            coverage_limits=("fixture only",),
+        )
+
+        with self.assertRaisesRegex(
+            TransitionError,
+            "VERIFIER_RESULT_EXECUTION_NOT_COMPLETED",
+        ):
+            apply_event_data(
+                recorded,
+                "record_verifier_result",
+                "observer:test",
+                {"result": result.to_dict()},
             )
 
 

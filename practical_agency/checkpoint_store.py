@@ -324,6 +324,23 @@ def apply_reconciliation_findings(
     invalidated = set(data["outcome"]["completion_proof"]) | set(
         integrity["required_gates"]
     )
+    verifier_results = continuity.setdefault("verifier_results", [])
+    invalidated_verifier_refs = {
+        item.get("result_ref")
+        for item in verifier_results
+        if isinstance(item, Mapping)
+        and item.get("subject_ref") in subjects
+        and isinstance(item.get("result_ref"), str)
+    }
+    continuity["verifier_results"] = [
+        item
+        for item in verifier_results
+        if not (
+            isinstance(item, Mapping)
+            and item.get("subject_ref") in subjects
+        )
+    ]
+    invalidated.update(invalidated_verifier_refs)
     continuity["durable_artifacts"] = [
         ref for ref in continuity["durable_artifacts"] if ref not in invalidated
     ]

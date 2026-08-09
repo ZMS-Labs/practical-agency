@@ -42,6 +42,7 @@ class MissionManifest:
             continuity.setdefault("deferred_interests", [])
             continuity.setdefault("processed_event_ids", [])
             continuity.setdefault("execution_receipts", [])
+            continuity.setdefault("verifier_results", [])
         errors = validate_manifest_dict(copied)
         if errors:
             raise ValueError("INVALID_MISSION_MANIFEST: " + " | ".join(errors))

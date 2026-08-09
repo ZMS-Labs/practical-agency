@@ -17,6 +17,7 @@ from practical_agency.checkpoint_store import (
 from practical_agency.coordinator import (
     CoordinationError,
     apply_capability_result,
+    consume_broker_grant,
     coordinate_once,
     dispatch_once,
 )
@@ -29,18 +30,29 @@ from practical_agency.watch_commission import (
     handle_crossing_event,
     prepare_disabled,
 )
-from tests.helpers import clone_payload, mission_os_event
+from tests.helpers import (
+    clone_payload,
+    mission_os_event,
+    record_fixture_verifier_result,
+)
 
 
 class ExecutionAdapter:
     adapter_ref = "fixture://adapter"
     capability_ids = ("fixture-writer",)
+    broker_enforced = True
 
     def __init__(self, result: Mapping[str, Any]) -> None:
         self.result = dict(result)
         self.calls: list[dict[str, Any]] = []
 
-    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
+    def dispatch(
+        self,
+        request: dict[str, Any],
+        *,
+        broker_grant: object | None = None,
+    ) -> dict[str, Any]:
+        consume_broker_grant(broker_grant, request, self.adapter_ref)
         self.calls.append(copy.deepcopy(request))
         return copy.deepcopy(self.result)
 
@@ -448,11 +460,12 @@ class IntegrityHardeningTests(unittest.TestCase):
         with self.assertRaisesRegex(TransitionError, "PROOF_BUNDLE_NOT_READY"):
             apply_event_data(active, "begin_verification", "mission-steward", {})
 
-        payload["continuity"]["durable_artifacts"] = [
-            "artifact:validator-pass",
-            "artifact:gate-pass",
-        ]
-        ready = MissionManifest.from_dict(payload)
+        proof_ready = record_fixture_verifier_result(active)
+        ready_payload = proof_ready.to_dict()
+        ready_payload["continuity"]["durable_artifacts"].append(
+            "artifact:gate-pass"
+        )
+        ready = MissionManifest.from_dict(ready_payload)
         verifying = apply_event_data(
             ready, "begin_verification", "mission-steward", {}
         )
@@ -463,9 +476,9 @@ class IntegrityHardeningTests(unittest.TestCase):
         payload["revision"] = 2
         payload["state"]["status"] = "active"
         payload["continuity"]["prior_checkpoint"] = "checkpoint:1"
-        payload["continuity"]["durable_artifacts"] = ["artifact:validator-pass"]
         payload["integrity"]["completion_acceptor"] = "reviewer:test"
         active = MissionManifest.from_dict(payload)
+        active = record_fixture_verifier_result(active)
         acted = apply_event_data(
             active,
             "record_action", "worker:test", {"action_ref": "artifact:material-work"},
@@ -547,6 +560,13 @@ class IntegrityHardeningTests(unittest.TestCase):
         self.assertIn(
             "artifact:validator-pass", repaired.continuity["durable_artifacts"]
         )
+        with self.assertRaisesRegex(TransitionError, "PROOF_BUNDLE_NOT_READY"):
+            apply_event_data(
+                repaired,
+                "begin_verification",
+                "mission-steward",
+                {},
+            )
 
     def test_watch_prepare_refuses_unverified_contract_before_adapter_dispatch(self) -> None:
         adapter = WatchAdapter()

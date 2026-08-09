@@ -17,30 +17,42 @@ Version 0.1 is a deterministic, standard-library mission kernel plus a portable
 Agent Skill. It is **not a daemon**, hosted service, scheduler, autonomous
 background actor, or source of independent machine goals.
 
-The repository exercises deterministic mission custody, bounded authority, atomic
-checkpoints, forward-compatible dynamic capability discovery, revision-bound
-events and proposals, exact return points, crash-visible receipt journaling,
-fail-closed live-state reconciliation, evidence-bearing independent completion,
-and pinned upstream interoperability in isolated tests. These tests verify
-structured provenance and recorded clearance; they do not prove unrestricted
-natural-language entailment.
+The repository exercises deterministic mission custody, bounded authority,
+atomic checkpoints, active-mission discovery, revision-bound events and
+proposals, exact return points, crash-visible receipt journaling, fail-closed
+live-state reconciliation, evidence-bearing acceptance, and pinned upstream
+interoperability. These tests verify structured provenance and recorded
+clearance; they do not prove unrestricted natural-language entailment or
+comparative efficacy.
 
-There is **no general-purpose shell execution adapter**. A bounded filesystem artifact adapter can write allowlisted text artifacts with on-disk
-receipts (`practical_agency.filesystem_artifact`). That is not v1 readiness.
-Cursor/Generic Agent Skills install inventory is LIVE for the climb tip
-(see `docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
-Customize→Skills panel and Claude live load remain unverified.
-comparative benefit over an ordinary capable agent is also unestablished
-until a controlled evaluation exists. Operator direction: defer `0.1.0` tag
-ceremony; invest in teeth toward v1.
+There is **no general-purpose shell execution adapter**. The production effect
+path is `filesystem-artifact@1`: a bounded filesystem artifact adapter with
+allowlisted text output and on-disk receipts. Calls require a one-use grant from
+the coordinator, and proof is represented by a typed verifier result bound to
+the request, observed
+artifact, and external receipt. Acceptance currently records the honest
+`declared-role-separation` assurance; `externally-proven` is refused until a
+principal-authentication verifier exists.
+
+Cursor/Generic Agent Skills install inventory is LIVE for the climb tip (see
+`docs/release/HARNESS-VERIFICATION-MATRIX-0.1.0.md`);
+Customize→Skills panel and Claude live load remain unverified. comparative benefit over an ordinary capable
+agent is also unestablished until a controlled evaluation exists. Operator
+direction: defer `0.1.0` tag ceremony and invest in teeth toward v1.
+
+The executable process proof starts from a workspace root, discovers the one
+active mission without receiving its mission path, crashes after a receipted
+effect, resumes in another process, detects planted artifact drift, repairs it
+through the broker, and closes only after a third process verifies the final
+receipt. This is a trustworthy vertical implementation path; it is not by
+itself a live-harness, efficacy, or `1.0.0` release claim.
 
 `1.0.0` is **reserved**, not imminent. It means the first operator-useful major:
 authorized intent installable in a declared harness, advanced through at least
 one bounded adapter with an external durable receipt, resumable from
-checkpoints, and closable only by an independent acceptor. See
-[docs/release/VERSIONING.md](docs/release/VERSIONING.md) and
+checkpoints, and closable only by an independently evaluated acceptance step.
+See [docs/release/VERSIONING.md](docs/release/VERSIONING.md) and
 [docs/release/RELEASE-1.0.0-CRITERIA.md](docs/release/RELEASE-1.0.0-CRITERIA.md).
-Tagging or accepting `0.1.0` does not satisfy those criteria.
 
 ## Conceptual stack
 
@@ -66,7 +78,8 @@ The project doctrine is **bounded delegated agency**. The acting role is the
    [`examples/minimal-mission.json`](examples/minimal-mission.json).
 4. Save revision 1 before approval, then advance the mission through closed
    events and atomic checkpoints.
-5. Complete material work only through the declared independent acceptor.
+5. Complete material work only through the declared acceptor and record the
+   actual separation assurance.
 
 A routine, reversible, directly checkable one-step task should not mint a mission.
 
@@ -77,17 +90,16 @@ The Python package contains:
 - strict `mission-manifest@1` validation and canonical JSON;
 - authority checks for permissions, protected state, costs, escalation, and
   revocation;
-- a closed mission state machine with proof-ready, evidence-bearing independent
-  acceptance;
-- hash-bound atomic checkpoint storage;
-- live-state reconciliation that invalidates stale completion/gate artifacts,
-  opens one bounded repair frontier, and requires fresh observation before
-  verification;
+- a closed mission state machine with typed verifier results and
+  evidence-bearing acceptance;
+- hash-bound atomic checkpoint storage and pathless active-mission discovery
+  from a workspace root;
+- live-state reconciliation that invalidates stale verifier results, opens one
+  bounded repair frontier, and requires fresh observation before verification;
 - dynamic capability discovery from immediate `SKILL.md` children, without a
   copied member list;
 - exact request/result/receipt and return-point binding;
-- one-action coordination, with load-bearing blockers permitting only the exact
-  recorded remediation action; and
+- one-action coordination with one-use, request-bound adapter grants; and
 - an adapter boundary that accepts `watch-commission@1` only through its
   originating verifier.
 
@@ -102,6 +114,12 @@ python .github/scripts/check_harness_surfaces.py
 python .github/scripts/check_public_content.py
 ```
 
+Run the fixed multi-process proof against an empty disposable workspace root:
+
+```bash
+python scripts/run_durable_mission_proof.py run --workspace-root <empty-workspace-root>
+```
+
 The permanent CI gate additionally checks out `epistemic-skills` at immutable
 revision `6e26484a9cae7629b233734fe5121137ba9168a8`. It requires the actual
 commission-watch semantic verifier and example corpus, and dynamically discovers
@@ -114,8 +132,8 @@ discipline defines and proves the observation claim; an external mechanism does
 the actual between-session watching. Practical Agency may retain a validated
 commission, coordinate an authorized adapter, preserve receipts, and record a
 receipted crossing handoff. A crossing cannot rewrite the frontier or reopen a
-completed mission; only a revision-bound replan proposed against the crossing and
-applied by the mission steward may do that.
+completed mission; only a revision-bound replan proposed against the crossing
+and applied by the mission steward may do that.
 
 Pinned interoperability tests establish that:
 
@@ -128,10 +146,7 @@ Pinned interoperability tests establish that:
 
 That proves carrier/verifier compatibility at one immutable revision. It does
 **not** authenticate receipt references, commission a production observer, admit
-a production adapter, or create an automatic `watch` → `manifest` route.
-Post-crossing method selection remains external to Practical Agency. The handoff
-contains a bounded condition, expected output contract, and return point rather
-than a named skill route.
+a production watch adapter, or create an automatic `watch` → `manifest` route.
 
 ## Repository map
 
@@ -139,18 +154,19 @@ than a named skill route.
 skills/manifest/                  sole public skill
 practical_agency/                 deterministic mission kernel
 contracts/                        portable JSON Schema carriers
-roles/                            steward and independent acceptor contracts
-adapters/                         optional execution boundary documentation
+roles/                            steward and acceptor contracts
+adapters/                         optional execution-boundary documentation
 examples/                         valid mission examples
-tests/                            deterministic, integration, and end-to-end fixtures
+scripts/                          fixed proof runners (not generic executors)
+tests/                            deterministic and process-level verification
 ```
 
 ## Relationship to epistemic-skills
 
-[`epistemic-skills`](https://github.com/ZMS-Labs/epistemic-skills) governs what may
-honestly bear epistemic load. Practical Agency governs how an operator-authorized
-mission preserves continuity and advances through bounded action. Neither package
-absorbs the other's methods or verdicts.
+[`epistemic-skills`](https://github.com/ZMS-Labs/epistemic-skills) governs what
+may honestly bear epistemic load. Practical Agency governs how an
+operator-authorized mission preserves continuity and advances through bounded
+action. Neither package absorbs the other's methods or verdicts.
 
 ## License
 

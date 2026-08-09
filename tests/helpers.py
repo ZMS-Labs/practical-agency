@@ -75,42 +75,9 @@ def mission_os_event(
     manifest: "MissionManifest", kind: str, content: dict[str, Any]
 ) -> dict[str, Any]:
     """Return a validated, revision-bound mission-OS event payload for tests."""
-    from practical_agency.mission_os import (
-        propose_absorb,
-        propose_defer,
-        propose_frontier_patch,
-        propose_replan_slice,
-        propose_return_rebind,
-    )
+    from practical_agency.mission_os import build_mission_os_event
 
-    if kind == "frontier_patch":
-        proposal = propose_frontier_patch(
-            manifest,
-            list(content["labels"]),
-            basis_refs=content.get("basis_refs"),
-            replace_range=tuple(content["replace_range"]) if "replace_range" in content else None,
-        )
-    elif kind == "replan_slice":
-        proposal = propose_replan_slice(
-            manifest,
-            new_frontier=list(content["labels"]),
-            contradiction_refs=list(content["contradiction_refs"]),
-            basis_refs=content.get("basis_refs"),
-            replace_range=tuple(content["replace_range"]) if "replace_range" in content else None,
-        )
-    elif kind == "defer":
-        proposal = propose_defer(manifest, content["interest"])
-    elif kind == "return_rebind":
-        proposal = propose_return_rebind(manifest, list(content["invalidate"]))
-    elif kind == "absorb":
-        proposal = propose_absorb(
-            manifest,
-            content["interest_index"],
-            amendment=content.get("amendment"),
-        )
-    else:
-        raise ValueError(f"unknown mission OS test proposal: {kind}")
-    return proposal.to_event_data()
+    return build_mission_os_event(manifest, kind, content)
 
 
 def critical_path_clearance(
@@ -121,3 +88,71 @@ def critical_path_clearance(
         "reason": reason,
         "basis_refs": list(basis_refs or ["authority:instruction"]),
     }
+
+
+def record_fixture_verifier_result(
+    manifest: "MissionManifest",
+    *,
+    proof_ref: str = "artifact:validator-pass",
+    subject_ref: str = "repo:example@rev-1",
+    value: object = "validated",
+) -> "MissionManifest":
+    """Record a real typed fixture verifier result through production events."""
+    from practical_agency.proof import VerifierResult
+    from practical_agency.state_machine import apply_event_data
+
+    request = {
+        "schema": "execution-request@1",
+        "request_id": (
+            f"{manifest.mission_id}:r{manifest.revision}:"
+            "fixture-proof:execution:f0"
+        ),
+        "mission_id": manifest.mission_id,
+        "mission_revision": manifest.revision,
+        "capability_id": "fixture-proof",
+        "requested_permissions": [],
+        "requested_effects": [proof_ref],
+        "estimated_costs": [],
+        "action": "observe fixture artifact",
+    }
+    receipt = {
+        "schema": "execution-receipt@1",
+        "request_id": request["request_id"],
+        "mission_id": request["mission_id"],
+        "mission_revision": request["mission_revision"],
+        "adapter_ref": "fixture-proof@1",
+        "status": "completed",
+        "artifact_refs": [proof_ref],
+        "observed_effects": [
+            {"kind": "fixture-observation", "artifact_ref": proof_ref, "value": value}
+        ],
+        "external_receipt_ref": f"fixture://receipt/{request['request_id']}",
+        "coverage_limits": ["fixture verifier only"],
+    }
+    recorded = apply_event_data(
+        manifest,
+        "record_execution_receipt",
+        "mission-steward",
+        {"receipt": receipt, "request": request},
+    )
+    result = VerifierResult.bind(
+        verifier_ref="fixture-verifier@1",
+        status="verified",
+        proof_ref=proof_ref,
+        subject_ref=subject_ref,
+        request=request,
+        receipt=receipt,
+        observation={
+            "kind": "fixture-observation",
+            "artifact_ref": proof_ref,
+            "value": value,
+        },
+        reason_code=None,
+        coverage_limits=("fixture verifier only",),
+    )
+    return apply_event_data(
+        recorded,
+        "record_verifier_result",
+        "observer:test",
+        {"result": result.to_dict()},
+    )

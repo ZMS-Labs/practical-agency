@@ -473,3 +473,50 @@ def emit_unanswered_condition(
         "condition": condition,
         "return_point": _return_point_dict(manifest, frontier_index),
     }
+
+
+def build_mission_os_event(
+    manifest: MissionManifest, kind: str, content: dict[str, Any]
+) -> dict[str, Any]:
+    """Build a validated, revision-bound mission-OS event payload.
+
+    This is the production API for constructing ``apply_mission_os`` event data.
+    Supported *kind* values: ``frontier_patch``, ``replan_slice``, ``defer``,
+    ``return_rebind``, ``absorb``.
+    """
+    if kind == "frontier_patch":
+        proposal = propose_frontier_patch(
+            manifest,
+            list(content["labels"]),
+            basis_refs=content.get("basis_refs"),
+            replace_range=(
+                tuple(content["replace_range"])
+                if "replace_range" in content
+                else None
+            ),
+        )
+    elif kind == "replan_slice":
+        proposal = propose_replan_slice(
+            manifest,
+            new_frontier=list(content["labels"]),
+            contradiction_refs=list(content["contradiction_refs"]),
+            basis_refs=content.get("basis_refs"),
+            replace_range=(
+                tuple(content["replace_range"])
+                if "replace_range" in content
+                else None
+            ),
+        )
+    elif kind == "defer":
+        proposal = propose_defer(manifest, content["interest"])
+    elif kind == "return_rebind":
+        proposal = propose_return_rebind(manifest, list(content["invalidate"]))
+    elif kind == "absorb":
+        proposal = propose_absorb(
+            manifest,
+            content["interest_index"],
+            amendment=content.get("amendment"),
+        )
+    else:
+        raise ValueError(f"UNKNOWN_MISSION_OS_PROPOSAL_KIND:{kind}")
+    return proposal.to_event_data()

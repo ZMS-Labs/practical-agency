@@ -48,8 +48,14 @@ class CoordinationDecision:
 class ExecutionAdapter(Protocol):
     adapter_ref: str
     capability_ids: tuple[str, ...]
+    broker_enforced: bool
 
-    def dispatch(self, request: dict[str, Any]) -> dict[str, Any]: ...
+    def dispatch(
+        self,
+        request: dict[str, Any],
+        *,
+        broker_grant: object | None = None,
+    ) -> dict[str, Any]: ...
 
 
 _EXECUTION_INPUT_FIELDS = {
@@ -92,6 +98,48 @@ _RESULT_STATUSES = {"completed", "declined", "blocked", "failed"}
 # Session-local issuance proves that a dispatch decision came from coordinate_once.
 # After a process restart callers must coordinate again against the live manifest.
 _ISSUED_DECISIONS: dict[str, tuple[str, str, str, str, int]] = {}
+
+
+class _BrokerDispatchGrant:
+    __slots__ = ("grant_id",)
+
+    def __init__(self, secret: object, grant_id: str) -> None:
+        if secret is not _BROKER_SECRET:
+            raise CoordinationError("BROKER_GRANT_CONSTRUCTION_FORBIDDEN")
+        self.grant_id = grant_id
+
+
+_BROKER_SECRET = object()
+_BROKER_GRANTS: dict[str, tuple[str, str]] = {}
+
+
+def _issue_broker_grant(
+    request: Mapping[str, Any], adapter_ref: str
+) -> _BrokerDispatchGrant:
+    grant_id = f"grant-{uuid4().hex}"
+    _BROKER_GRANTS[grant_id] = (_canonical_sha256(request), adapter_ref)
+    return _BrokerDispatchGrant(_BROKER_SECRET, grant_id)
+
+
+def consume_broker_grant(
+    broker_grant: object,
+    request: Mapping[str, Any],
+    adapter_ref: str,
+) -> None:
+    """Consume the one-use capability issued inside ``dispatch_once``.
+
+    Production adapters must call this before any effect or receipt preparation.
+    A request dictionary by itself is never execution authority.
+    """
+
+    if not isinstance(broker_grant, _BrokerDispatchGrant):
+        raise CoordinationError("BROKER_DISPATCH_REQUIRED")
+    issued = _BROKER_GRANTS.pop(broker_grant.grant_id, None)
+    if issued is None:
+        raise CoordinationError("BROKER_GRANT_NOT_ISSUED_OR_ALREADY_CONSUMED")
+    expected = (_canonical_sha256(request), adapter_ref)
+    if issued != expected:
+        raise CoordinationError("BROKER_GRANT_BINDING_MISMATCH")
 
 
 def normalize_invocation_intent(text: str) -> str:
@@ -473,7 +521,16 @@ def dispatch_once(
         or request.get("capability_id") not in capability_ids
     ):
         raise CoordinationError("ADAPTER_CAPABILITY_MISMATCH")
-    result = adapter.dispatch(deepcopy(request))
+    if getattr(adapter, "broker_enforced", None) is not True:
+        raise CoordinationError("ADAPTER_BROKER_ENFORCEMENT_REQUIRED")
+    grant = _issue_broker_grant(request, str(adapter_ref))
+    try:
+        result = adapter.dispatch(deepcopy(request), broker_grant=grant)
+    except Exception:
+        _BROKER_GRANTS.pop(grant.grant_id, None)
+        raise
+    if _BROKER_GRANTS.pop(grant.grant_id, None) is not None:
+        raise CoordinationError("ADAPTER_BROKER_GRANT_NOT_CONSUMED")
     if not isinstance(result, dict):
         raise CoordinationError("INVALID_EXECUTION_RECEIPT:root")
     _validate_execution_receipt(
