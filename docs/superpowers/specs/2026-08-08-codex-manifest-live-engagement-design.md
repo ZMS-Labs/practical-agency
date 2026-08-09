@@ -2,7 +2,9 @@
 
 **Date:** 2026-08-08
 
-**Status:** draft for operator review
+**Status:** approved for implementation
+
+**Operator approval:** 2026-08-08
 
 **Branch:** `codex/manifest-live-engagement`
 
@@ -17,20 +19,33 @@ Build the first operator-usable Practical Agency path as one installable Codex
 plugin containing:
 
 - the one public `manifest` skill; and
-- a bundled, task-scoped stdio MCP controller exposing structured internal
-  mission operations.
+- a bundled, host-managed stdio MCP controller exposing structured internal
+  mission operations; and
+- bundled Codex lifecycle hooks that capture host-observed prompt/workspace
+  context and deny covered competing local-tool paths while manifest is
+  engaged.
 
 The public skill is the invocation and stewardship policy. The MCP controller
 is the executable path into the deterministic kernel. The controller owns
 pathless mission engagement, durable state transitions, authorization, brokered
-effects, observation, and checkpointing. It is launched on demand by Codex and
-is not a daemon, scheduler, monitor, or independent persistence provider.
+effects, observation, and checkpointing. Codex owns the stdio child process
+lifecycle; correctness never depends on whether one server process is reused or
+replaced. The controller is not a daemon, scheduler, monitor, or independent
+persistence provider.
 
-This alpha will not claim that installing a plugin removes Codex's native file
-or shell tools. Instead, it makes bypass detectable: a mission cannot complete
-while workspace changes exist that are not bound to broker-issued execution
-receipts. Literal host-level non-bypassability remains a later controlled-agent
-runtime problem.
+While an explicit manifest engagement or unfinished mission is active, a
+trusted plugin `PreToolUse` hook denies every supported local function-tool path
+except the Practical Agency MCP namespace. That includes Codex shell,
+`apply_patch`, other MCP tools, and other local function tools on the current
+documented hook path. The controller refuses dispatch without a current
+host-context receipt identifying the installed hook definition. Durable
+governed-path reconciliation remains the independent backstop.
+
+This establishes denial for covered Codex local-tool paths plus completion-
+gated drift detection. It does not establish a complete host security boundary:
+hosted tools are outside the local hook path, specialized tools may opt out,
+hooks can be disabled or untrusted, and another same-user process can mutate
+files. Those limits are reported, never hidden behind a non-bypassability claim.
 
 ## Why this is the next build
 
@@ -54,6 +69,11 @@ Current live facts establish the remaining gap:
   it is not merged and contains no review comments at the observed head.
 - No Docker or Podman executable is available on the development host, so a
   generic command runner cannot truthfully be described as sandboxed.
+- Codex CLI `0.146.0` reports hooks and plugins as stable features. Its exact
+  tagged plugin MCP parser resolves a relative `cwd` against the installed
+  plugin root, and a current OpenAI plugin uses `cwd: "."` with a package-
+  relative server argument. This makes an installed-cache Python module launch
+  feasible without a developer-machine path, subject to installed UAT.
 
 OpenAI's plugin architecture explicitly supports combining skills with an MCP
 server when workflow guidance needs controlled, structured capabilities. A
@@ -80,7 +100,9 @@ That engagement must:
 6. preserve process-interruption recovery and exact mission bindings;
 7. label acceptance assurance honestly; and
 8. leave an exact source-to-installed provenance receipt plus first-use
-   telemetry.
+   telemetry; and
+9. bind engagement and authority to a host-observed prompt receipt while
+   keeping principal assurance no stronger than the evidence.
 
 `/manifest` remains the desired human shorthand. The alpha acceptance oracle is
 the harness-supported explicit skill form (`$manifest`) plus the natural phrase
@@ -92,13 +114,17 @@ task actually discovers and invokes it.
 - No second public skill.
 - No daemon, scheduler, background worker, or resident coordinator.
 - No arbitrary shell, Python, npm, Git, or executable adapter.
-- No claim that Codex native tools are removed or technically inaccessible.
+- No claim that Codex native tools are removed or inaccessible outside the
+  covered, trusted-hook engagement window.
 - No container-sandbox claim while no real container substrate is available.
 - No automatic acceptance claim from process separation alone.
 - No ChatGPT, Claude, Cursor, or other harness parity in this alpha.
 - No broad workflow-capability inventory or stage-to-skill router.
 - No UI, public release, tag, PR merge, or v1-readiness claim.
 - No proof yet that the product improves outcomes across many missions.
+- No claim of resistance to a malicious same-user process, arbitrary code
+  already executing in the controller interpreter, or coordinated rewriting of
+  checkpoints and receipts.
 
 The supported effect surface is UTF-8 repository artifact creation or
 replacement under an explicit path allowlist and expected-before-state guard.
@@ -120,10 +146,12 @@ and compatibility surface.
 
 ### B. Skill plus bundled stdio MCP controller
 
-The skill triggers a small local MCP server that validates structured inputs
-and calls the existing kernel directly. Codex can install both pieces as one
-plugin, expose typed tools, apply per-tool approval policy, and launch the
-server only for the task.
+The skill directs the model into a small local MCP server that validates
+structured inputs and calls the existing kernel directly. Codex can install
+both pieces as one plugin, expose typed tools, and apply per-tool approval
+policy. Plugin hooks add a host-observed invocation receipt and covered-tool
+denial. Server process lifetime remains host-owned and is not an architectural
+assumption.
 
 **Decision:** selected. It is the smallest architecture that converts the
 skill from doctrine into a live, testable engagement path without introducing
@@ -144,7 +172,8 @@ usefulness or when host-level prevention becomes a release requirement.
 
 ```mermaid
 flowchart LR
-    U["Operator: $manifest / manifest this"] --> S["One public manifest skill"]
+    U["Operator: $manifest / manifest this"] --> H["UserPromptSubmit host-context receipt"]
+    H --> S["One public manifest skill"]
     S --> E["manifest_engage"]
     E --> R["Mission repository + checkpoint verifier"]
     R --> K["Deterministic mission kernel"]
@@ -156,7 +185,9 @@ flowchart LR
     P --> V
     V --> C["Atomic mission checkpoint"]
     C --> R
-    N["Native unreceipted mutation"] --> D["Workspace-drift verifier"]
+    H --> G["PreToolUse covered-path guard"]
+    N["Competing covered local tool"] -->|"deny before execution"| G
+    O["Uncovered or external mutation"] --> D["Governed-path drift verifier"]
     D -->|"blocks completion"| K
 ```
 
@@ -166,16 +197,24 @@ The repository root becomes a valid Codex plugin root:
 
 ```text
 .codex-plugin/plugin.json   required plugin entry point
-.mcp.json                   bundled task-scoped MCP server declaration
+.mcp.json                   bundled host-managed MCP server declaration
+hooks/hooks.json            host-context and covered-tool hook declarations
+hooks/manifest_hook.py      hook entry point using the deterministic package
 skills/manifest/SKILL.md    only public skill
 practical_agency/           deterministic kernel and MCP bridge
 ```
 
-The Codex manifest points `skills` to `./skills/` and `mcpServers` to
-`./.mcp.json`. The implementation must use a package-relative launch mechanism
-that works from the installed cache copy. It must not embed a developer machine
-path. Launcher behavior is verified in an installed plugin before being
-documented as supported.
+The Codex manifest points `skills` to `./skills/`, `mcpServers` to
+`./.mcp.json`, and hooks to `./hooks/hooks.json`. The MCP declaration uses
+`cwd: "."`, which Codex `0.146.0` resolves against the installed plugin root,
+then launches `python -m practical_agency.mcp_server`. It must not embed a
+developer-machine path. The installed cache copy must complete a real
+`initialize` and `tools/list` exchange before this launcher is accepted.
+
+Hook commands use Codex's plugin-root environment binding and a Windows command
+override. The exact hook definition and scripts are hashed into installation
+provenance. Installing or enabling a plugin does not itself prove hook trust;
+fresh-task UAT must show that the current definition is trusted and running.
 
 The repo also provides a local marketplace entry for development. Installation
 is a mutation of user Codex configuration and cache, so it happens only during
@@ -194,8 +233,8 @@ The initial internal tool surface is:
 | --- | --- | --- |
 | `manifest_engage` | read/control-state | Resolve workspace, discover exactly one unfinished mission, validate the latest checkpoint, capture/reload the durable workspace baseline, reconcile live state, and return the frontier. |
 | `manifest_define` | mission-state only | Create a draft from the verbatim instruction and explicit desired state, proof, authority, protected state, stop conditions, and acceptance declaration. |
-| `manifest_authorize` | mission-state only | Record an explicit operator authority event; never infer approval from a draft or tool availability. |
-| `manifest_dispatch` | world effect | The sole MCP path to an adapter. Coordinate one bounded request, issue a one-use grant, execute, observe, record the receipt and typed verifier result, and checkpoint atomically. |
+| `manifest_authorize` | mission-state only | Record an authority event bound to a host-observed prompt receipt containing explicit approval; never infer approval from a draft, actor string, or tool availability. |
+| `manifest_dispatch` | world effect | The sole MCP path to an adapter. Require the current host-gate posture, coordinate one bounded request, issue a one-use grant, execute, observe, record the receipt and typed verifier result, and checkpoint atomically. |
 | `manifest_verify` | read/control-state | Re-observe receipts, artifact bindings, baseline/delta scope, and completion proof; transition to `verifying` only when all checks permit it. |
 | `manifest_accept` | mission-state only | Record a verdict with actor and assurance metadata; reject steward self-acceptance and unsupported assurance claims. |
 
@@ -208,8 +247,32 @@ On a non-routine invocation, the skill calls `manifest_engage` before proposing
 or performing mission work. The operator is never asked for a mission path or
 mission id.
 
-`manifest_engage` receives the current workspace root from the Codex harness,
-not from the operator. It applies these closed outcomes:
+Before the model runs, `UserPromptSubmit` writes `host-context@1` under the
+workspace control namespace at
+`missions/.host-context/<session-sha256>/<turn-sha256>.json`. It binds the exact
+prompt, prompt SHA-256, workspace root, Codex session id, turn id, a fresh
+256-bit context nonce, installed hook-definition SHA-256, and creation time.
+The file is written atomically. The hook reports only that host context is
+available as developer context; it does not reveal the nonce or ask the model
+to supply the path. This is host-observed provenance, not cryptographic
+principal identity.
+
+When the model calls a Practical Agency MCP tool, `PreToolUse` locates the
+current host-context receipt, writes `host-gate-posture@1` bound to the hook's
+tool name, tool-use id, session, turn, workspace, hook-definition hash, lock
+reason, context-nonce SHA-256, and `allow-controller` decision under
+`missions/.host-gates/<tool-use-sha256>.json`, then rewrites the call input with
+two reserved receipt references. The posture is written atomically. The hook
+overwrites any model-supplied values for those fields. Controller tool schemas
+accept the reserved fields only as optional host injection; business inputs
+never require the operator to provide them.
+
+`manifest_engage` receives those hook-injected receipt references, not an
+operator-supplied workspace path or mission id. It validates that both receipts
+are under the same workspace control namespace, that their prompt, tool, turn,
+session, workspace, and hook hashes agree, and that the workspace contains the
+`.git` repository marker as a file or directory. It then applies these closed
+outcomes:
 
 - exactly one valid unfinished mission: resume it;
 - no unfinished mission and no definition: return
@@ -223,16 +286,53 @@ not from the operator. It applies these closed outcomes:
 
 The skill may help the model propose definition fields, but it may not alter
 the verbatim instruction, infer authority, or silently choose among active
-missions.
+missions. State-changing calls bind to the current host-context receipt. An
+explicit approval prompt can authorize the compact mission contract; an actor
+label alone cannot.
+
+### Host gate and engagement lock
+
+For a turn whose host-context receipt identifies explicit `$manifest` intent,
+the hook creates an engagement lock before any model tool call. For later turns,
+an unfinished durable mission keeps the lock active. On every supported
+`PreToolUse` path during that window:
+
+- Practical Agency MCP tools are allowed only after the hook writes a current
+  posture receipt and injects its reserved references into the call;
+- all other local function tools are denied before execution; and
+- the denial records tool name, session id, turn id, workspace, hook hash, and
+  the exact reason without recording secret arguments.
+
+Every state-changing controller operation requires a current
+`host-gate-posture@1` binding for its own tool call; `manifest_dispatch` also
+requires the active engagement lock. Missing, stale, disabled, model-supplied,
+or mismatched hook evidence returns `HOST_GATE_UNAVAILABLE`; it never silently
+downgrades an enforced mission to detection-only execution. Hosted tools and
+specialized paths outside the documented local hook path remain coverage
+limits. The fresh-task UAT therefore includes attempted shell, `apply_patch`,
+and non-Practical-Agency MCP calls and records their host denials.
+
+Hook writes are limited to fixed-schema, atomic control-plane evidence under
+`missions/.host-context/` and `missions/.host-gates/`. The hook refuses
+symlinked control roots, cannot write governed artifacts, cannot call an
+adapter, and cannot advance mission state. These records are excluded from the
+world-effect surface; every governed repository effect still passes through
+`manifest_dispatch` and the single broker.
 
 ### Durable baseline and bypass detection
 
-At activation, the controller records a canonical workspace baseline in the
-mission checkpoint. The baseline includes relevant repository-relative paths,
-object type, size, and SHA-256, while excluding the mission's own checkpoints,
-receipts, and explicitly ignored volatile paths. Existing dirty user work is
-therefore protected as starting state rather than misclassified as a mission
-effect.
+At definition, the operator-approved mission names a non-empty
+`governed_paths` list. In this alpha each entry is a normalized repository-
+relative regular-file path admitted by the artifact allowlist. Absolute paths,
+parent traversal, symlinks at any path component, directories, and paths under
+`missions/` are rejected.
+
+The controller records an exact baseline only for those governed paths: absent,
+or regular-file object type, byte size, and SHA-256. It also records the parent-
+component identities needed to detect later symlink substitution. There is no
+vague whole-repository walk and no claim to detect changes outside the governed
+set. Existing dirty bytes at a governed path are protected as starting state,
+not misclassified as a mission effect.
 
 Every broker receipt records the exact before and after binding for each
 affected path. Before verification or acceptance, the controller computes the
@@ -242,8 +342,10 @@ Any remainder yields typed verifier status `contradicted` with reason
 `verifying`; it cannot complete until the drift is reconciled by an explicit
 authority decision.
 
-This establishes completion-gated mediation and bypass evidence. It does not
-establish host-level prevention.
+This establishes completion-gated governed-path consistency and evidence of
+covered host denials. It cannot prove causal exclusivity when an uncovered
+same-user process writes the same final bytes, and it does not establish a
+complete host security boundary.
 
 ### Brokered repository artifact effect
 
@@ -257,14 +359,16 @@ alpha. It gains only what live repository use requires:
 - request binding to mission id, mission revision, request id, adapter id, and
   intended effect;
 - atomic write and crash-visible journal semantics;
-- one-use in-memory broker grant consumed before any effect or receipt
+- one-use opaque in-memory broker grant consumed before any effect or receipt
   preparation; and
 - post-write observation producing a typed verifier result bound to the actual
   bytes and external receipt.
 
 The adapter remains importable for testing, but direct production dispatch
-without an unforgeable current broker grant fails before touching either the
-artifact or receipt store. MCP exposes no adapter-specific tool.
+without the current opaque process-local broker capability fails before
+touching either the artifact or receipt store. This is an API and normal-agent
+control boundary, not a defense against arbitrary hostile code already running
+inside the same Python interpreter. MCP exposes no adapter-specific tool.
 
 ### Verification without generic execution
 
@@ -294,13 +398,15 @@ assurance label.
 
 ### No-daemon lifecycle
 
-Codex launches the stdio server for an active task. Durable mission state lives
-in checkpoints and external receipt files, not server memory. Killing the MCP
+Codex owns the stdio server lifecycle. Durable mission state lives in
+checkpoints and external receipt files, not server memory. Killing the MCP
 process discards all in-memory grants and caches. A new process must call
 `manifest_engage`, load the latest valid checkpoint, verify receipts, and
-reconcile the workspace before dispatch.
+reconcile the governed paths before dispatch.
 
-No background continuation claim is made. When the task ends, the server ends.
+No background continuation claim is made. Correctness does not depend on the
+server ending with the task; process-instance evidence in UAT proves when a
+replacement was actually used.
 
 ## Named refusal surface
 
@@ -312,6 +418,8 @@ at the new boundary:
 - `ACTIVE_MISSION_NOT_FOUND`
 - `ACTIVE_MISSION_AMBIGUOUS`
 - `INSTALL_PROVENANCE_MISMATCH`
+- `HOST_CONTEXT_INVALID`
+- `HOST_GATE_UNAVAILABLE`
 - `EXPECTED_BEFORE_STATE_MISMATCH`
 - `UNRECEIPTED_WORKSPACE_DRIFT`
 - `SANDBOXED_VERIFIER_UNAVAILABLE`
@@ -323,18 +431,20 @@ errors and do not advance the mission revision.
 ## First dogfood mission
 
 After bootstrap packaging and installation, a fresh Codex task will use
-`$manifest` to make one useful, bounded source-tree text change in this
-repository through `filesystem-artifact@1`. The exact target is selected from a
-real remaining documentation or configuration need at execution time; it is not
-a throwaway fixture.
+`$manifest` to create `docs/operations/codex-manifest-alpha.md` through
+`filesystem-artifact@1`. This is the preselected operator runbook for the
+verified invocation, resumption, enforcement posture, and claim ceiling. It is
+a durable product artifact, not a throwaway fixture. Its exact intended bytes
+are approved in the mission definition before dispatch.
 
 The run must then:
 
 1. checkpoint the brokered effect and external receipt;
-2. terminate the first controller process;
+2. record the first controller process-instance identity and terminate it;
 3. start a new process with no mission path or in-memory state;
 4. discover the active mission from the workspace;
-5. plant an out-of-band mutation in the governed path;
+5. have the UAT harness plant an explicitly authorized out-of-band mutation in
+   that governed path, outside the controller process and Codex tool surface;
 6. detect `UNRECEIPTED_WORKSPACE_DRIFT` or the more specific artifact-hash
    contradiction;
 7. restore the intended bytes through the broker;
@@ -357,8 +467,14 @@ Implementation follows test-driven development.
 - Failing tests first for every new behavior.
 - MCP initialize, tool listing, schema validation, tool calls, and structured
   errors over real stdio pipes.
+- Host-context receipt creation and validation from exact prompt, workspace,
+  session, turn, and hook-definition bindings.
+- Engagement lock and `PreToolUse` allow/deny matrix for controller tools,
+  shell, `apply_patch`, non-controller MCP, and other local functions.
 - Pathless create/resume and ambiguous/invalid mission refusals.
 - Durable baseline round-trip and pre-existing dirty-state protection.
+- Governed-path normalization, traversal/symlink refusal, and explicit
+  outside-scope coverage limits.
 - Direct adapter bypass rejected before artifact or receipt mutation.
 - Expected-before mismatch and unreceipted-drift completion block.
 - External receipt and typed verifier binding to mission revision and request.
@@ -378,6 +494,9 @@ Implementation follows test-driven development.
   of SHA-256 values.
 - The installed MCP server starts from the cache copy and lists the expected
   tools.
+- The installed hook definition and scripts match provenance hashes, the hook
+  is trusted for that exact definition, and a fresh task produces current
+  host-context and host-gate evidence.
 - Source-only success does not satisfy installation acceptance.
 
 ### Fresh-task UAT
@@ -387,11 +506,13 @@ same plugin discovery surface, must record:
 
 - selected plugin and skill;
 - exact invocation text;
+- host-context receipt and exact trusted hook-definition hash;
 - first controller tool called;
 - mission id and checkpoint revision returned;
 - dispatched request and external receipt reference;
 - interruption/resume evidence;
 - planted-drift verifier result;
+- attempted covered-tool calls and their pre-execution denials;
 - third-process verification; and
 - source/install provenance hashes.
 
@@ -419,6 +540,8 @@ The alpha is complete only when all of the following are observed:
 - A fresh task discovers the one public `manifest` skill.
 - Invocation enters the bundled controller before mission work.
 - The operator supplies no mission path or mission id.
+- The installed exact-hash hook captures the invocation and denies covered
+  competing local-tool calls before execution.
 - A real repository text effect is brokered, receipted, observed, and
   checkpointed.
 - A dead controller process is replaced; the replacement resumes solely from
@@ -427,6 +550,8 @@ The alpha is complete only when all of the following are observed:
 - A third process verifies the external receipt and mission/request bindings.
 - Acceptance assurance is truthful.
 - No generic execution adapter, daemon, second public skill, or merge is added.
+- The completion report states that hook coverage is a guardrail rather than a
+  complete boundary and that same-user hostile tampering is out of scope.
 - Required checks pass at the exact final working-tree fingerprint.
 
 ## Value test and stopping rule
