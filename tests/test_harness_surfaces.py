@@ -68,6 +68,18 @@ class HarnessSurfaceTests(unittest.TestCase):
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("check_harness_surfaces.py", ci)
 
+    def test_harness_check_includes_codex_plugin_surface(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / ".github" / "scripts" / "check_harness_surfaces.py")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+        self.assertIn("codex plugin", completed.stdout.casefold())
+        self.assertIn("mcp", completed.stdout.casefold())
+
 
 if __name__ == "__main__":
     unittest.main()

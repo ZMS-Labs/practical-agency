@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "practical-agency": {
+      "title": "Practical Agency",
+      "description": "Pathless durable mission control with bounded brokered effects.",
+      "cwd": ".",
+      "command": "python",
+      "args": [
+        "-m",
+        "practical_agency.mcp_server"
+      ]
+    }
+  }
+}

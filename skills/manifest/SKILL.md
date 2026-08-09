@@ -64,6 +64,21 @@ static routing table.
 
 ## Create or resume
 
+For every non-routine engagement, call `manifest_engage` first. Do not supply a
+workspace path or mission identifier; the trusted host receipts bind the current
+workspace and tool call. Reserved host-reference fields are hook-injected
+evidence—never invent, alter, or solicit them from the operator.
+
+Use only Practical Agency MCP operations for governed effects while the mission
+lock is active. In particular, do not route a governed effect through shell,
+`apply_patch`, another MCP server, or a direct adapter. `manifest_dispatch` is
+the sole brokered effect path.
+
+When definition is required, call `manifest_define`, show the operator the
+exact authority token and complete authority scope returned by the controller, and
+call `manifest_authorize` only after the operator explicitly supplies that exact
+approval phrase. Never paraphrase approval into existence.
+
 ### Create
 
 1. Capture the operator instruction verbatim.
@@ -129,6 +144,14 @@ it. Freeze the mission revision and proof bundle for an acceptor that did not
 perform the material work. Preserve `PASS`, `FAIL`, or `INCONCLUSIVE` exactly.
 Only `PASS`, complete proof references, no unresolved verdicts, and the declared
 independent actor may produce `completed`.
+
+### Guardrail claim ceiling
+
+The host hooks prove host-observed context and covered-tool posture for recorded
+calls. They do not prove an OS sandbox, universal non-bypassability, or distinct
+principal identity. Unless an external principal verifier says otherwise,
+describe acceptance exactly as **declared-role separation** and preserve that
+coverage limit in the mission result.
 
 Closure records:
 

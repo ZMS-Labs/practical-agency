@@ -68,6 +68,18 @@ class ManifestSkillTests(unittest.TestCase):
         claude = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(claude["skills"], "./skills/")
 
+    def test_manifest_skill_drives_non_routine_work_only_through_controller(self) -> None:
+        text = (SKILLS / "manifest" / "SKILL.md").read_text(encoding="utf-8")
+        for required in (
+            "call `manifest_engage` first",
+            "only practical agency mcp operations",
+            "exact authority token",
+            "guardrail claim ceiling",
+            "declared-role separation",
+        ):
+            self.assertIn(required, text.casefold())
+        self.assertIn("`manifest_dispatch`", text)
+
 
 if __name__ == "__main__":
     unittest.main()

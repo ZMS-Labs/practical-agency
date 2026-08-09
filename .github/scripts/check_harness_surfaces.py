@@ -20,6 +20,7 @@ PLUGIN_RELATIVE = (
     "plugin.json",
     ".cursor-plugin/plugin.json",
     ".claude-plugin/plugin.json",
+    ".codex-plugin/plugin.json",
 )
 
 
@@ -63,6 +64,21 @@ def check_plugin_surfaces() -> list[str]:
             errors.append(f"PLUGIN_SKILLS_ROOT:{relative}")
         if payload.get("version") != "0.1.0":
             errors.append(f"PLUGIN_VERSION:{relative}:{payload.get('version')!r}")
+        if relative == ".codex-plugin/plugin.json":
+            if payload.get("mcpServers") != "./.mcp.json":
+                errors.append("CODEX_PLUGIN_MCP_ROOT")
+            if payload.get("hooks") != "./hooks/hooks.json":
+                errors.append("CODEX_PLUGIN_HOOK_ROOT")
+    try:
+        mcp = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        server = mcp["mcpServers"]["practical-agency"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        errors.append(f"CODEX_MCP_INVALID:{error}")
+    else:
+        if server.get("cwd") != "." or server.get("command") != "python":
+            errors.append("CODEX_MCP_LAUNCH_INVALID")
+        if server.get("args") != ["-m", "practical_agency.mcp_server"]:
+            errors.append("CODEX_MCP_ARGS_INVALID")
     return errors
 
 
@@ -141,7 +157,10 @@ def main(argv: list[str] | None = None) -> int:
             f"description_exact={report['description_exact']}"
         )
     else:
-        print("harness surfaces ok: plugin roots -> ./skills/; source intents present")
+        print(
+            "harness surfaces ok: Codex plugin MCP and plugin roots -> ./skills/; "
+            "source intents present"
+        )
     return 0
 
 

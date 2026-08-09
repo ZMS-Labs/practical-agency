@@ -1,0 +1,37 @@
+{
+  "name": "practical-agency",
+  "version": "0.1.0",
+  "description": "Durable, human-authorized mission control for coordinated agentic work.",
+  "author": {
+    "name": "ZMS Labs",
+    "url": "https://github.com/ZMS-Labs"
+  },
+  "homepage": "https://github.com/ZMS-Labs/practical-agency",
+  "repository": "https://github.com/ZMS-Labs/practical-agency",
+  "license": "GPL-3.0-or-later",
+  "keywords": [
+    "agent-skills",
+    "mission-control",
+    "authorization",
+    "durable-workflows"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Practical Agency",
+    "shortDescription": "Durable human-authorized mission control",
+    "longDescription": "Turn explicit operator intent into governed, resumable missions with bounded effects, durable receipts, typed verification, and honest acceptance boundaries.",
+    "developerName": "ZMS Labs",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/ZMS-Labs/practical-agency",
+    "defaultPrompt": [
+      "Manifest this outcome and carry it through with durable checkpoints."
+    ]
+  }
+}
