@@ -6,14 +6,35 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-3-review` |
+| Subject revision | `durable-capability-transaction-v1-stage-4-orphan-tests` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T05:35:46Z` |
+| Prepared UTC | `2026-08-10T08:50:56Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0006-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0008-origin.md` |
+
+## Stage 4 superseding instructions
+
+Stage 3 is complete. ChatGPT Pro's exact review is retained at
+`docs/outsource/durable-capability-transaction/relay/0007-target.md`. Its verdict is NO-GO and its
+smallest recommended repair is authoritative for this stage: add focused subprocess tests for the
+crash window after `begin_capability_execution` is durably saved and before
+`record_capability_result` is saved.
+
+The current outbound request is Stage 4 tests only. Return the smallest tests-only unified diff
+that forces two process exits against one canonical local-read transaction: one exit before the
+target is read and one after exactly one target read but before result persistence. A replacement
+process must engage pathlessly. Both cases must require a durable `execution_state=unknown`, blocked
+mission state, a named `CAPABILITY_EFFECT_UNKNOWN:<grant_id>` marker, no fabricated result, no
+additional observation, original-grant non-replayability, and refusal to issue or execute a
+replacement grant for the unresolved return point.
+
+Do not implement production code, repair other Stage 3 findings, enable web, broaden discovery, add
+shell or mutation, or claim tests were run. Return the complete relay envelope in exactly one fenced
+`text` block with no prose before or after it and no nested fences. Instructions for Stages 1-3
+below are historical context and are superseded by this section where they conflict.
 
 ## Stage 3 superseding instructions
 
