@@ -6,14 +6,42 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-1-red-tests` |
+| Subject revision | `durable-capability-transaction-v1-stage-2-implementation` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
 | Prepared UTC | `2026-08-10T05:35:46Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0001-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0004-origin.md` |
+
+## Stage 2 superseding instructions
+
+Stage 1 is complete. ChatGPT Pro's exact fenced relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0003-target.md`; its tests-only work product is
+applied as `tests/test_durable_capability_transaction.py`. The origin compiled the module and ran:
+
+```text
+python -m unittest tests.test_durable_capability_transaction -v
+```
+
+All 13 tests executed and the suite was RED with 16 assertion failures. Every failure matched the
+relay's test-to-defect matrix: pre-observation grant/scope/authority/descriptor refusals failed,
+fresh-controller replay observed twice, caller-owned request/result/grant MCP surfaces remained
+reachable, runtime request/result schemas did not conform, web retrieval was entered, and negative
+verdicts remained verifying instead of becoming active or blocked. There were no syntax, import,
+fixture, or unexpected-error failures.
+
+The current outbound request is Stage 2 only. Produce the smallest production-code patch that makes
+the committed adversarial module GREEN while preserving all invariants and existing behavior. Do
+not change, delete, skip, weaken, or special-case the RED tests. Do not add new tests unless a
+production seam cannot otherwise be implemented truthfully. Do not claim tests were executed.
+
+For Stage 2, production hunks are allowed only where required by the RED evidence. The target must
+return one unified diff and a requirement-to-hunk explanation. Wrap the complete relay envelope in
+exactly one fenced `text` block with no prose before or after it and no nested fences. Stage 1-only
+instructions later in this document are historical context and are superseded by this section where
+they conflict.
 
 ## Required outcome
 
