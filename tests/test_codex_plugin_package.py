@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOL_NAMES = [
     "manifest_engage",
     "manifest_capability_request",
+    "manifest_capability_issue",
     "manifest_capability_result",
     "manifest_capability_execute",
     "manifest_clarify",
@@ -150,7 +151,7 @@ class CodexPluginPackageTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
-        self.assertIn("codex_mcp_tools=10", completed.stdout)
+        self.assertIn("codex_mcp_tools=11", completed.stdout)
         self.assertIn("runtime_manifest=verified", completed.stdout)
 
 

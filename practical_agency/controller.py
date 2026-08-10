@@ -15,6 +15,8 @@ from practical_agency.checkpoint_store import (
 )
 from practical_agency.coordinator import CoordinationError, coordinate_once, dispatch_once
 from practical_agency.capability_operations import CapabilityOperationError, execute_read
+from practical_agency.capability_discovery import FileSystemSkillProvider, discover_capabilities
+from practical_agency.capability_grants import CapabilityGrantError, issue_grant_from_descriptor
 from practical_agency.filesystem_artifact import (
     FilesystemArtifactAdapter,
     FilesystemArtifactError,
@@ -486,6 +488,35 @@ class ManifestController:
         updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})
         checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
         return {"status": "capability-requested", "grant": deepcopy(dict(grant)), "request": deepcopy(dict(request)), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256, "return_point": deepcopy(dict(grant["return_point"]))}
+
+    def manifest_capability_issue(
+        self,
+        *,
+        capability_id: str,
+        blocking_condition: str,
+        admitted_operation: str,
+        evidence_scope: list[str],
+        request: Mapping[str, Any],
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_capability_issue", _host_context_ref, _host_gate_ref)
+        if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
+            raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        discovered = self._discover(binding.workspace_root)
+        descriptors = discover_capabilities([FileSystemSkillProvider(self.plugin_root / "skills")])
+        matches = [item for item in descriptors if item.capability_id == capability_id]
+        if len(matches) != 1 or matches[0].availability != "available":
+            raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
+        manifest = discovered.manifest
+        point = {"mission_id": manifest.mission_id, "revision": manifest.revision, "frontier_index": 0, "label": manifest.state["current_frontier"][0]}
+        try:
+            grant = issue_grant_from_descriptor(matches[0], mission_id=manifest.mission_id, mission_revision=manifest.revision, blocking_condition=blocking_condition, return_point=point, admitted_operation=admitted_operation, evidence_scope=evidence_scope)
+        except (CapabilityGrantError, IndexError) as error:
+            raise ControllerError(str(error)) from error
+        updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "capability-issued", "grant": grant, "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
 
     def manifest_capability_result(
         self,

@@ -84,6 +84,11 @@ TOOLS = [
         "inputSchema": _closed_schema({"grant": {"type": "object"}, "request": {"type": "object"}}, ("grant", "request")),
     },
     {
+        "name": "manifest_capability_issue",
+        "description": "Discover one current descriptor and issue one exact mission-bound grant.",
+        "inputSchema": _closed_schema({"capability_id": {"type": "string", "minLength": 1}, "blocking_condition": {"type": "string", "minLength": 1}, "admitted_operation": {"type": "string", "minLength": 1}, "evidence_scope": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "request": {"type": "object"}}, ("capability_id", "blocking_condition", "admitted_operation", "evidence_scope", "request")),
+    },
+    {
         "name": "manifest_capability_result",
         "description": "Record a typed result for one previously granted capability request.",
         "inputSchema": _closed_schema({"grant_id": {"type": "string", "minLength": 1}, "result": {"type": "object"}}, ("grant_id", "result")),

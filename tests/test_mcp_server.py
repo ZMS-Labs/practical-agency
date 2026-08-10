@@ -22,6 +22,7 @@ INITIALIZE_PARAMS = {
 TOOL_NAMES = [
     "manifest_engage",
     "manifest_capability_request",
+    "manifest_capability_issue",
     "manifest_capability_result",
     "manifest_capability_execute",
     "manifest_clarify",
