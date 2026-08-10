@@ -6,14 +6,35 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-6-positive-mcp-tests` |
+| Subject revision | `durable-capability-transaction-v1-stage-7-positive-mcp-implementation` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T10:01:23Z` |
+| Prepared UTC | `2026-08-10T10:26:40Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0012-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0014-origin.md` |
+
+## Stage 7 superseding instructions
+
+Stage 6 is complete. ChatGPT Pro's exact tests-only relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0013-target.md`; its diff is applied unchanged
+to `tests/test_durable_capability_transaction.py`. The origin ran the single real-stdio integration
+test. It executed normally and failed only when the otherwise valid capability issue frame returned
+top-level `MCP_PROTOCOL_ERROR`, exactly matching the Stage 3 nested-schema finding.
+
+The current outbound request is Stage 7 production implementation only. Return the smallest
+production-code unified diff that makes the committed Stage 6 test GREEN while preserving protocol
+closure. A valid nested capability intent must traverse the actual MCP schema and custom validator;
+unexpected nested request fields and object-valued nested evidence payload entries must remain
+protocol refusals before checkpoint or observation change. Do not make nested objects generically
+open or defer malformed-shape rejection to the controller.
+
+Do not change, weaken, skip, special-case, or delete tests. Do not broaden production discovery,
+enable web, integrate mission proof, change principal handling, modify orphan recovery, add shell or
+mutation, or claim tests were run. Return the complete relay envelope in exactly one fenced `text`
+block with no prose before or after it and no nested fences. Instructions for Stages 1-6 below are
+historical context and are superseded by this section where they conflict.
 
 ## Stage 6 superseding instructions
 

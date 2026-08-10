@@ -25,6 +25,7 @@ from practical_agency.manifest_model import MissionManifest
 from practical_agency.mcp_server import McpServer, ProtocolError
 from practical_agency.mission_repository import discover_active_mission
 from practical_agency.state_machine import TransitionError, apply_event_data
+from tests import test_mcp_server as mcp_process_tests
 from tests.helpers import minimal_payload, record_fixture_verifier_result
 
 
@@ -933,6 +934,212 @@ class DurableCapabilityTransactionRedTests(unittest.TestCase):
                     item.get("result"), Mapping
                 ):
                     self.assertEqual(item["result"].get("observed_effects", []), [])
+
+    def test_real_stdio_mcp_issue_execute_round_trip_and_nested_fields_fail_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            runtime, workspace, _ = self._setup(base)
+            journal = base / "stdio-observations.log"
+            instrumentation = base / "instrumentation"
+            instrumentation.mkdir()
+            (instrumentation / "sitecustomize.py").write_text(
+                "from pathlib import Path\n"
+                f"_target=Path({str((workspace / 'evidence.txt').resolve())!r}).resolve()\n"
+                f"_journal=Path({str(journal)!r})\n"
+                "_read_text=Path.read_text\n"
+                "def counted(path,*args,**kwargs):\n"
+                "    if path.resolve()==_target:\n"
+                "        with _journal.open('a',encoding='utf-8') as stream:\n"
+                "            stream.write('read\\n'); stream.flush()\n"
+                "    return _read_text(path,*args,**kwargs)\n"
+                "Path.read_text=counted\n",
+                encoding="utf-8",
+            )
+
+            def checkpoint() -> tuple[str, str, int]:
+                discovered = discover_active_mission(workspace)
+                return (
+                    str(discovered.receipt.path),
+                    discovered.receipt.sha256,
+                    discovered.manifest.revision,
+                )
+
+            def call(
+                server: mcp_process_tests.StdioServer,
+                request_id: int,
+                name: str,
+                arguments: Mapping[str, Any],
+            ) -> dict[str, object]:
+                return server.request(
+                    request_id,
+                    "tools/call",
+                    {"name": name, "arguments": dict(arguments)},
+                )
+
+            pythonpath = os.pathsep.join(
+                [str(instrumentation), os.environ.get("PYTHONPATH", "")]
+            ).rstrip(os.pathsep)
+            with (
+                patch.object(mcp_process_tests, "ROOT", runtime),
+                patch.dict(os.environ, {"PYTHONPATH": pythonpath}),
+                mcp_process_tests.StdioServer(workspace) as server,
+            ):
+                initialized = server.request(
+                    100, "initialize", mcp_process_tests.INITIALIZE_PARAMS
+                )
+                self.assertEqual(
+                    initialized["result"]["protocolVersion"], "2025-03-26"
+                )
+                server.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+                listed = server.request(101, "tools/list", {})
+                tool_names = {tool["name"] for tool in listed["result"]["tools"]}
+                self.assertTrue(
+                    {"manifest_capability_issue", "manifest_capability_execute"}
+                    <= tool_names
+                )
+
+                intent = self._intent("file.read", "evidence.txt")
+                issue_base = {
+                    "capability_id": "dynamic-reader",
+                    "blocking_condition": "inspect the bounded evidence",
+                    "admitted_operation": "file.read",
+                    "evidence_scope": ["evidence.txt"],
+                }
+                bad_issue_args = {
+                    **issue_base,
+                    "request": {**intent, "unexpected_nested_field": "forged"},
+                    **self._refs(
+                        workspace,
+                        runtime,
+                        "manifest_capability_issue",
+                        "stdio-invalid-issue",
+                    ),
+                }
+                before_bad_issue = checkpoint()
+                bad_issue = call(
+                    server, 102, "manifest_capability_issue", bad_issue_args
+                )
+                self.assertEqual(
+                    bad_issue["error"]["data"]["code"], "MCP_PROTOCOL_ERROR"
+                )
+                self.assertEqual(checkpoint(), before_bad_issue)
+                self.assertEqual(self._read_count(journal), 0)
+
+                issued_frame = call(
+                    server,
+                    103,
+                    "manifest_capability_issue",
+                    {
+                        **issue_base,
+                        "request": intent,
+                        **self._refs(
+                            workspace,
+                            runtime,
+                            "manifest_capability_issue",
+                            "stdio-valid-issue",
+                        ),
+                    },
+                )
+                self.assertNotIn("error", issued_frame)
+                self.assertFalse(issued_frame["result"]["isError"])
+                issued = issued_frame["result"]["structuredContent"]
+                grant_id = self._grant_id(issued)
+                issued_checkpoint = checkpoint()
+                self.assertEqual(issued["status"], "capability-issued")
+                self.assertEqual(
+                    (str(issued["checkpoint_ref"]), issued["checkpoint_sha256"]),
+                    issued_checkpoint[:2],
+                )
+                self.assertNotEqual(issued_checkpoint, before_bad_issue)
+                self.assertEqual(self._read_count(journal), 0)
+
+                execute_base = {
+                    "grant_id": grant_id,
+                    "operation": "file.read",
+                    "target": "evidence.txt",
+                    "evidence_refs": ["evidence.txt"],
+                }
+                bad_execute_args = {
+                    **execute_base,
+                    "evidence_payload": {
+                        "evidence.txt": {"unexpected_nested_field": "forged"}
+                    },
+                    **self._refs(
+                        workspace,
+                        runtime,
+                        "manifest_capability_execute",
+                        "stdio-invalid-execute",
+                    ),
+                }
+                before_bad_execute = checkpoint()
+                bad_execute = call(
+                    server, 104, "manifest_capability_execute", bad_execute_args
+                )
+                self.assertEqual(
+                    bad_execute["error"]["data"]["code"], "MCP_PROTOCOL_ERROR"
+                )
+                self.assertEqual(checkpoint(), before_bad_execute)
+                self.assertEqual(self._read_count(journal), 0)
+
+                executed_frame = call(
+                    server,
+                    105,
+                    "manifest_capability_execute",
+                    {
+                        **execute_base,
+                        **self._refs(
+                            workspace,
+                            runtime,
+                            "manifest_capability_execute",
+                            "stdio-valid-execute",
+                        ),
+                    },
+                )
+                self.assertNotIn("error", executed_frame)
+                self.assertFalse(executed_frame["result"]["isError"])
+                executed = executed_frame["result"]["structuredContent"]
+
+            discovered = discover_active_mission(workspace)
+            record = self._record(discovered.manifest, grant_id)
+            request, result = record.get("request"), record.get("result")
+            self.assertIsInstance(request, Mapping)
+            self.assertIsInstance(result, Mapping)
+            assert isinstance(request, Mapping) and isinstance(result, Mapping)
+            request_schema = json.loads(
+                (ROOT / "contracts" / "capability-request.schema.json").read_text()
+            )
+            result_schema = json.loads(
+                (ROOT / "contracts" / "capability-result.schema.json").read_text()
+            )
+            self.assertEqual(executed["status"], "capability-executed")
+            self.assertEqual(executed["grant_id"], grant_id)
+            self.assertEqual(executed["result"], result)
+            self.assertEqual(
+                (str(executed["checkpoint_ref"]), executed["checkpoint_sha256"]),
+                (str(discovered.receipt.path), discovered.receipt.sha256),
+            )
+            self.assertEqual(self._read_count(journal), 1)
+            self.assertEqual(_schema_errors(request, request_schema), [])
+            self.assertEqual(_schema_errors(result, result_schema), [])
+            self.assertEqual(request["capability_id"], "dynamic-reader")
+            self.assertEqual(
+                request["expected_output_contract"],
+                "contracts/capability-result.schema.json",
+            )
+            self.assertEqual(result["request_id"], request["request_id"])
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(
+                result["observed_effects"],
+                [
+                    {
+                        "target": "evidence.txt",
+                        "content": "authorized evidence",
+                        "mutation": False,
+                    }
+                ],
+            )
 
     def test_mcp_tool_list_removes_injection_surfaces_and_caller_grant(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
