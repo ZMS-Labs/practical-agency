@@ -6,14 +6,36 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-5-orphan-implementation` |
+| Subject revision | `durable-capability-transaction-v1-stage-6-positive-mcp-tests` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T09:28:24Z` |
+| Prepared UTC | `2026-08-10T10:01:23Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0010-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0012-origin.md` |
+
+## Stage 6 superseding instructions
+
+Stage 5 is complete and verified. ChatGPT Pro's exact implementation relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0011-target.md`; the focused 15-test module and
+the full 261-test suite pass, with 2 skips, and all required repository gates pass. The orphaned
+execution boundary is now fail-closed.
+
+The current outbound request is Stage 6 tests only. Address the next independent Stage 3 blocker:
+no valid positive `manifest_capability_issue` request can traverse the actual stdio MCP validator.
+Return the smallest tests-only unified diff that drives a real MCP initialize/list/call sequence
+through a copied exact runtime containing an eligible dynamically discovered read-only capability.
+The test must successfully issue and execute one bounded local read through MCP, prove the persisted
+canonical request/result satisfy their strict contracts, prove exactly one target observation, and
+show malformed or extra nested request/evidence fields still fail closed before checkpoint or
+observation change.
+
+Do not implement production code, broaden production discovery, enable web, integrate mission proof,
+change principal handling, modify the Stage 4 tests, add shell or mutation, or claim tests were run.
+Return the complete relay envelope in exactly one fenced `text` block with no prose before or after
+it and no nested fences. Instructions for Stages 1-5 below are historical context and are
+superseded by this section where they conflict.
 
 ## Stage 5 superseding instructions
 
