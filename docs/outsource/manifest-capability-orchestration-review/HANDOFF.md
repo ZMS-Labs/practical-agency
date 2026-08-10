@@ -13,7 +13,7 @@
 | Packet commit | `supplied by the immutable prompt URL after publication` |
 | Prepared UTC | `2026-08-10T05:06:16Z` |
 | Supersedes | `NONE` |
-| Relay head | `docs/outsource/manifest-capability-orchestration-review/relay/0001-origin.md` |
+| Relay head | `docs/outsource/manifest-capability-orchestration-review/relay/0002-target.md` |
 
 ## Required outcome
 
@@ -69,6 +69,24 @@ Every required path must exist at the packet commit. Do not rely on local absolu
 attachments, or the originating chat.
 
 ## Current state
+
+### Relay outcome
+
+- ChatGPT `GPT-5.6 Sol` with `Pro` effort returned a stable `outsource-relay@1` response after one
+  prompt-only submission. The advisory review status is `COMPLETE`; its implementation verdict is
+  `NO-GO` for the fresh single-invocation capability claim.
+- The response is retained verbatim in
+  `docs/outsource/manifest-capability-orchestration-review/relay/0002-target.md` (UTF-8 text with a
+  final LF; SHA-256 `7b4697a528336027baa05c72c03d387617c74123b5d69d21be929cd1c0c54f48`).
+- Origin source verification confirmed the load-bearing findings: production discovery is limited
+  to Practical Agency's own skill root; capability execution accepts caller-carried grants; reads
+  occur before grant consumption; the stored grant is not the one-use authority; direct result
+  injection is reachable; runtime request/result shapes do not satisfy their strict schemas; web
+  redirects and response bodies are not safely bounded; and FAIL/INCONCLUSIVE has no exposed
+  controller transition.
+- The accepted next boundary is analysis only: implement and adversarially test one durable
+  capability transaction before spending another live mission on the three-capability proof. No
+  implementation change is authorized by this relay alone.
 
 ### Verified
 
