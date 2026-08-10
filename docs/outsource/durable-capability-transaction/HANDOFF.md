@@ -6,14 +6,36 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-2-implementation` |
+| Subject revision | `durable-capability-transaction-v1-stage-3-review` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
 | Prepared UTC | `2026-08-10T05:35:46Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0004-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0006-origin.md` |
+
+## Stage 3 superseding instructions
+
+Stage 2 is implemented and pushed. The exact Pro implementation relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0005-target.md`. Its production semantics were
+integrated into the exact packet source because the relay's unified-diff context did not match the
+packet commit. No Stage 1 test was changed. The focused 13-test module passes; the full repository
+suite passes 259 tests with 2 skips; compile, contracts, package, and public-content gates pass.
+
+The current outbound request is Stage 3 review only. Independently inspect the exact packet commit
+and return a security/architecture verdict. In particular, trace a process death after
+`begin_capability_execution` is checkpointed but before `record_capability_result`, and determine
+whether pathless resume can safely distinguish zero effect, completed effect, and unknown effect.
+Also test whether caller-provided `operation`, `target`, or evidence can still select authority not
+fully determined by the durable grant; whether any reachable direct request/result injection or
+pre-authorization observation remains; and whether negative acceptance can bypass evidence or
+principal rules.
+
+Do not produce code in Stage 3. Return findings ordered by severity, a GO/NO-GO verdict for using
+this transaction in the live three-capability single-invocation proof, and one smallest test-first
+next patch if NO-GO. Stage 1 and Stage 2 instructions later in this document are historical context
+and are superseded by this section where they conflict.
 
 ## Stage 2 superseding instructions
 
