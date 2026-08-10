@@ -1,0 +1,45 @@
+{
+  "schema": "codex-plugin-runtime-proof@1",
+  "observed_at": "2026-08-10T12:53:09.6963794Z",
+  "source_commit": "39702eaccce39e339103e9216226e87acb9cf8d0",
+  "codex_cli_version": "0.146.0",
+  "plugin_id": "practical-agency@practical-agency-dev",
+  "plugin_version": "0.1.0",
+  "reinstall": {
+    "method": "codex plugin remove followed by codex plugin add",
+    "status": "succeeded"
+  },
+  "runtime_provenance": {
+    "schema": "install-provenance@1",
+    "status": "match",
+    "file_count": 38,
+    "source_manifest_sha256": "c51955975ad004c455b9c20e2ae469bcb971d3aeb185fb4f667eca30caf610be",
+    "installed_manifest_sha256": "c51955975ad004c455b9c20e2ae469bcb971d3aeb185fb4f667eca30caf610be"
+  },
+  "fresh_app_server": {
+    "skill": {
+      "name": "practical-agency:manifest",
+      "enabled": true
+    },
+    "mcp_server": {
+      "name": "practical-agency",
+      "version": "0.1.0",
+      "tools": [
+        "manifest_engage",
+        "manifest_capability_issue",
+        "manifest_capability_execute",
+        "manifest_define",
+        "manifest_verify",
+        "manifest_dispatch",
+        "manifest_authorize",
+        "manifest_accept",
+        "manifest_clarify"
+      ]
+    }
+  },
+  "coverage_limits": [
+    "The probe used a fresh standalone Codex app-server process.",
+    "An already-open task does not hot-reload newly restored MCP tools.",
+    "This receipt does not prove the outstanding single-invocation mission or host-owned interruption reconciliation path."
+  ]
+}
