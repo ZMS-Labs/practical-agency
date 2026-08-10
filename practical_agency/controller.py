@@ -5,7 +5,7 @@ import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from practical_agency.authority import authorize_action
@@ -16,6 +16,7 @@ from practical_agency.capability_discovery import (
 )
 from practical_agency.capability_grants import (
     CapabilityGrantError,
+    issue_grant,
     issue_grant_from_descriptor,
 )
 from practical_agency.capability_operations import CapabilityOperationError, execute_read
@@ -57,6 +58,12 @@ from practical_agency.state_machine import (
 
 class ControllerError(RuntimeError):
     """Named refusal from the operator-facing manifest controller."""
+
+
+class HostCapabilityRegistry(Protocol):
+    def observe_member_capabilities(self, binding: HostBinding) -> Mapping[str, Any]: ...
+    def invoke_member_capability(self, binding: HostBinding, invocation_ref: str, grant_id: str, execution_attempt_id: str, canonical_request_bytes: bytes) -> Mapping[str, Any]: ...
+    def lookup_member_invocation(self, execution_attempt_id: str) -> Mapping[str, Any] | None: ...
 
 
 _DEFINITION_FIELDS = (
@@ -103,13 +110,45 @@ _READ_AUTHORITY = {
     "file.read": ("repository:read", "bounded reads"),
     "resource.read": ("repository:read", "bounded reads"),
 }
+_CAPABILITY_NEED_FIELDS = {"schema", "need_id", "blocking_condition", "need_kind", "evidence_scope", "required_permissions", "expected_effects", "estimated_costs", "timeout_or_stop_condition", "return_point"}
+_HOST_CATALOG_FIELDS = {"schema", "observation_id", "host_binding", "entries", "catalog_sha256"}
+_HOST_ENTRY_FIELDS = {"member_root", "descriptor_path", "member_binding", "availability", "degradation_reason"}
+_HOST_MEMBER_FIELDS = {"owner_package_id", "owner_runtime_sha256", "capability_id", "descriptor_sha256", "input_contract", "output_contract", "authority_required", "need_kinds", "non_mutating", "invocation_ref"}
+_HOST_CONTRACT_FIELDS = {"id", "sha256"}
+_HOST_RECEIPT_FIELDS = {"schema", "host_binding", "issue_catalog_sha256", "execute_catalog_sha256", "member_binding", "grant_id", "execution_attempt_id", "request_id", "request_sha256", "invocation_status", "result_json", "result_sha256", "returned_control_point", "external_durable_receipt_ref", "host_coverage_limits"}
+_HOST_MEMBER_OPERATION = "host.member.invoke"
+
+
+def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(dict(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
-    encoded = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _closed(value: object, fields: set[str]) -> bool:
+    return isinstance(value, Mapping) and set(value) == fields
+
+
+def _host_binding_payload(binding: HostBinding) -> dict[str, str]:
+    return {"session_id": binding.context.session_id, "turn_id": binding.context.turn_id, "workspace_root": str(binding.workspace_root), "context_nonce_sha256": _sha256_text(binding.context.context_nonce)}
+
+
+def _require(condition: bool, code: str) -> None:
+    if not condition:
+        raise ControllerError(code)
+
+
+def _file_sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise ControllerError("HOST_CAPABILITY_REGISTRY_INVALID") from error
 
 
 def _nonempty(value: object) -> bool:
@@ -338,8 +377,14 @@ def _capability_effect_unknown_marker(manifest: MissionManifest) -> str | None:
 class ManifestController:
     """Compose pathless mission operations without exposing storage identity."""
 
-    def __init__(self, *, plugin_root: Path | str) -> None:
+    def __init__(
+        self,
+        *,
+        plugin_root: Path | str,
+        host_capability_registry: HostCapabilityRegistry | None = None,
+    ) -> None:
         self.plugin_root = Path(plugin_root).resolve()
+        self.host_capability_registry = host_capability_registry
         self.process_instance_id = f"controller-{uuid4().hex}"
 
     def _binding(
@@ -389,6 +434,402 @@ class ManifestController:
         if descriptor.source_sha256 != descriptor_digest:
             raise ControllerError("CAPABILITY_DESCRIPTOR_MISMATCH")
         return descriptor
+
+    def _host_registry(self) -> HostCapabilityRegistry:
+        registry = self.host_capability_registry
+        if registry is None:
+            raise ControllerError("HOST_CAPABILITY_REGISTRY_UNAVAILABLE")
+        if any(not callable(getattr(registry, name, None)) for name in ("observe_member_capabilities", "invoke_member_capability", "lookup_member_invocation")):
+            raise ControllerError("HOST_CAPABILITY_REGISTRY_INVALID")
+        return registry
+
+    @staticmethod
+    def _host_file(root: Path, ref: object) -> Path:
+        _require(_nonempty(ref), "HOST_CAPABILITY_REGISTRY_INVALID")
+        relative = Path(str(ref))
+        _require(not relative.is_absolute() and bool(relative.parts) and ".." not in relative.parts, "HOST_CAPABILITY_REGISTRY_INVALID")
+        candidate = root
+        for part in relative.parts:
+            candidate = candidate / part
+            _require(not candidate.is_symlink(), "HOST_CAPABILITY_REGISTRY_INVALID")
+        try:
+            candidate.resolve().relative_to(root)
+        except ValueError as error:
+            raise ControllerError("HOST_CAPABILITY_REGISTRY_INVALID") from error
+        _require(candidate.is_file(), "HOST_CAPABILITY_REGISTRY_INVALID")
+        return candidate.resolve()
+
+    def _observe_host_members(self, binding: HostBinding) -> tuple[str, list[dict[str, Any]]]:
+        registry = self._host_registry()
+        try:
+            catalog = registry.observe_member_capabilities(binding)
+        except Exception as error:
+            raise ControllerError("HOST_CAPABILITY_REGISTRY_INVALID") from error
+        _require(
+            _closed(catalog, _HOST_CATALOG_FIELDS)
+            and catalog.get("schema") == "host-capability-catalog@1"
+            and _nonempty(catalog.get("observation_id"))
+            and _is_sha256(catalog.get("catalog_sha256"))
+            and catalog.get("host_binding") == _host_binding_payload(binding)
+            and isinstance(catalog.get("entries"), list),
+            "HOST_CAPABILITY_REGISTRY_INVALID",
+        )
+        body = {"schema": catalog["schema"], "observation_id": catalog["observation_id"], "host_binding": deepcopy(catalog["host_binding"]), "entries": deepcopy(catalog["entries"])}
+        try:
+            catalog_sha256 = _canonical_sha256(body)
+        except (TypeError, ValueError) as error:
+            raise ControllerError("HOST_CAPABILITY_REGISTRY_INVALID") from error
+        _require(catalog_sha256 == catalog["catalog_sha256"], "HOST_CAPABILITY_REGISTRY_INVALID")
+        entries: list[dict[str, Any]] = []
+        for entry in catalog["entries"]:
+            _require(_closed(entry, _HOST_ENTRY_FIELDS) and _closed(entry.get("member_binding"), _HOST_MEMBER_FIELDS), "HOST_CAPABILITY_REGISTRY_INVALID")
+            member = entry["member_binding"]
+            _require(
+                all(_nonempty(member.get(field)) for field in ("owner_package_id", "capability_id", "invocation_ref"))
+                and _is_sha256(member.get("owner_runtime_sha256"))
+                and _is_sha256(member.get("descriptor_sha256"))
+                and _nonempty_string_list(member.get("authority_required"))
+                and _nonempty_string_list(member.get("need_kinds"))
+                and member.get("non_mutating") is True
+                and entry.get("availability") in {"available", "unavailable", "degraded"}
+                and (
+                    (entry.get("availability") == "available" and entry.get("degradation_reason") is None)
+                    or (entry.get("availability") != "available" and _nonempty(entry.get("degradation_reason")))
+                ),
+                "HOST_CAPABILITY_REGISTRY_INVALID",
+            )
+            input_contract = member.get("input_contract")
+            output_contract = member.get("output_contract")
+            _require(
+                all(_closed(contract, _HOST_CONTRACT_FIELDS) and _nonempty(contract.get("id")) and _is_sha256(contract.get("sha256")) for contract in (input_contract, output_contract)),
+                "HOST_CAPABILITY_REGISTRY_INVALID",
+            )
+            root_value = entry.get("member_root")
+            _require(_nonempty(root_value), "HOST_CAPABILITY_REGISTRY_INVALID")
+            root_path = Path(str(root_value))
+            root = root_path.resolve()
+            _require(root_path.is_absolute() and not root_path.is_symlink() and root_path == root and root.is_dir() and root != self.plugin_root and self.plugin_root not in root.parents and root not in self.plugin_root.parents, "HOST_CAPABILITY_REGISTRY_INVALID")
+            descriptor_path = self._host_file(root, entry.get("descriptor_path"))
+            _require(_file_sha256(descriptor_path) == member["descriptor_sha256"], "HOST_CAPABILITY_REGISTRY_INVALID")
+            descriptors = [
+                item
+                for item in discover_capabilities([FileSystemSkillProvider(descriptor_path.parent.parent)])
+                if Path(item.source_ref).resolve() == descriptor_path
+            ]
+            _require(len(descriptors) == 1, "HOST_CAPABILITY_REGISTRY_INVALID")
+            descriptor = descriptors[0]
+            need_kinds = descriptor.metadata.get("need_kinds")
+            _require(
+                descriptor.availability == "available"
+                and descriptor.kind == "skill"
+                and descriptor.persistence.value == "external"
+                and descriptor.independence == "actor"
+                and descriptor.capability_id == member["capability_id"]
+                and descriptor.source_sha256 == member["descriptor_sha256"]
+                and descriptor.input_contract == input_contract["id"]
+                and descriptor.output_contract == output_contract["id"]
+                and list(descriptor.authority_required) == list(member["authority_required"])
+                and isinstance(need_kinds, (list, tuple))
+                and list(need_kinds) == list(member["need_kinds"])
+                and descriptor.metadata.get("non_mutating") in {True, "true"},
+                "HOST_CAPABILITY_REGISTRY_INVALID",
+            )
+            for contract in (input_contract, output_contract):
+                contract_path = self._host_file(root, contract["id"])
+                repository_contract_path = self._host_file(self.plugin_root, contract["id"])
+                contract_sha256 = _file_sha256(contract_path)
+                _require(
+                    contract_sha256 == contract["sha256"]
+                    and _file_sha256(repository_contract_path) == contract_sha256,
+                    "HOST_CAPABILITY_REGISTRY_INVALID",
+                )
+            entries.append(deepcopy(dict(entry)))
+        return str(catalog["catalog_sha256"]), entries
+
+    @staticmethod
+    def _durable_capability_need(manifest: MissionManifest, expected_revision: int) -> dict[str, Any]:
+        blockers = manifest.state.get("blockers")
+        frontier = manifest.state.get("current_frontier")
+        _require(
+            manifest.state.get("status") == "blocked"
+            and isinstance(blockers, list)
+            and bool(blockers)
+            and isinstance(frontier, list)
+            and bool(frontier)
+            and _nonempty(frontier[0]),
+            "CAPABILITY_REQUEST_INVALID",
+        )
+        records = [
+            item
+            for item in manifest.continuity.get("decisions", [])
+            if isinstance(item, Mapping)
+            and item.get("kind") == "capability-need"
+            and isinstance(item.get("need"), Mapping)
+            and item["need"].get("blocking_condition") == frontier[0]
+            and item["need"].get("blocking_condition") in blockers
+            and isinstance(item["need"].get("return_point"), Mapping)
+            and item["need"]["return_point"].get("revision") == expected_revision
+        ]
+        _require(len(records) == 1 and set(records[0]) == {"kind", "need"}, "CAPABILITY_REQUEST_INVALID")
+        need = records[0].get("need")
+        _require(
+            _closed(need, _CAPABILITY_NEED_FIELDS)
+            and need.get("schema") == "capability-need@1"
+            and all(_nonempty(need.get(field)) for field in ("need_id", "blocking_condition", "need_kind", "timeout_or_stop_condition"))
+            and all(_nonempty_string_list(need.get(field)) for field in ("evidence_scope", "required_permissions", "expected_effects", "estimated_costs"))
+            and len(need["evidence_scope"]) == 1
+            and list(need["expected_effects"]) == list(need["evidence_scope"]),
+            "CAPABILITY_REQUEST_INVALID",
+        )
+        point = need.get("return_point")
+        _require(
+            _closed(point, {"mission_id", "revision", "frontier_index", "label"})
+            and point.get("mission_id") == manifest.mission_id
+            and point.get("revision") == expected_revision
+            and point.get("frontier_index") == 0
+            and point.get("label") == need["blocking_condition"]
+            and frontier[0] == need["blocking_condition"]
+            and need["blocking_condition"] in blockers,
+            "CAPABILITY_RETURN_POINT_MISMATCH",
+        )
+        return deepcopy(dict(need))
+
+    @staticmethod
+    def _select_host_member(entries: list[dict[str, Any]], need: Mapping[str, Any]) -> dict[str, Any]:
+        capability_ids = [str(entry["member_binding"]["capability_id"]) for entry in entries]
+        if len(capability_ids) != len(set(capability_ids)):
+            raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
+        matches = [
+            entry
+            for entry in entries
+            if entry["availability"] == "available"
+            and entry["degradation_reason"] is None
+            and need["need_kind"] in entry["member_binding"]["need_kinds"]
+            and entry["member_binding"]["input_contract"]["id"] == _CAPABILITY_REQUEST_CONTRACT
+            and entry["member_binding"]["output_contract"]["id"] == _CAPABILITY_RESULT_CONTRACT
+            and entry["member_binding"]["authority_required"] == need["required_permissions"]
+            and entry["member_binding"]["non_mutating"] is True
+        ]
+        if not matches:
+            raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
+        if len(matches) != 1:
+            raise ControllerError("CAPABILITY_SELECTION_AMBIGUOUS")
+        return deepcopy(matches[0])
+
+    @staticmethod
+    def _capability_record(manifest: MissionManifest, grant_id: str) -> Mapping[str, Any]:
+        records = [item for item in manifest.capabilities.get("invoked", []) if isinstance(item, Mapping) and item.get("grant_id") == grant_id]
+        if len(records) != 1:
+            raise ControllerError("CAPABILITY_GRANT_NOT_FOUND")
+        return records[0]
+
+    def _issue_host_capability(self, binding: HostBinding) -> dict[str, Any]:
+        self._host_registry()
+        discovered = self._discover(binding.workspace_root)
+        unknown_marker = _capability_effect_unknown_marker(discovered.manifest)
+        if unknown_marker is not None:
+            raise ControllerError(unknown_marker)
+        manifest = discovered.manifest
+        need = self._durable_capability_need(manifest, manifest.revision + 1)
+        issue_catalog_sha256, entries = self._observe_host_members(binding)
+        member = self._select_host_member(entries, need)["member_binding"]
+        authority_errors = authorize_action(manifest, str(member["capability_id"]), need["required_permissions"], need["expected_effects"], need["estimated_costs"])
+        if authority_errors:
+            raise ControllerError(authority_errors[0])
+        try:
+            grant = issue_grant(
+                {
+                    "mission_id": manifest.mission_id,
+                    "mission_revision": manifest.revision + 1,
+                    "capability_id": member["capability_id"],
+                    "capability_descriptor_sha256": member["descriptor_sha256"],
+                    "blocking_condition": need["blocking_condition"],
+                    "return_point": deepcopy(need["return_point"]),
+                    "admitted_operation": _HOST_MEMBER_OPERATION,
+                    "evidence_scope": list(need["evidence_scope"]),
+                    "mutation": False,
+                    "expires_after_use": True,
+                }
+            )
+        except CapabilityGrantError as error:
+            raise ControllerError(str(error)) from error
+        request_id = f"capability-request:{grant['grant_id']}"
+        request = {
+            "schema": "capability-request@1",
+            "request_id": request_id,
+            "mission_id": manifest.mission_id,
+            "mission_revision": manifest.revision + 1,
+            "capability_id": member["capability_id"],
+            "capability_source_sha256": member["descriptor_sha256"],
+            "bounded_question_or_action": need["blocking_condition"],
+            "authority_receipt": f"checkpoint-sha256:{discovered.receipt.sha256}",
+            "expected_output_contract": member["output_contract"]["id"],
+            "return_point": deepcopy(need["return_point"]),
+            "timeout_or_stop_condition": need["timeout_or_stop_condition"],
+        }
+        grant.update(
+            {
+                "need_id": need["need_id"],
+                "need_sha256": _canonical_sha256(need),
+                "member_binding": deepcopy(dict(member)),
+                "issue_catalog_sha256": issue_catalog_sha256,
+                "request_id": request_id,
+                "request_sha256": _canonical_sha256(request),
+            }
+        )
+        try:
+            updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "capability-issued", "grant_id": str(grant["grant_id"]), "grant": deepcopy(grant), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+
+    def _host_result_from_receipt(
+        self,
+        receipt: object,
+        *,
+        binding: HostBinding,
+        issue_catalog_sha256: str,
+        execute_catalog_sha256: str,
+        member: Mapping[str, Any],
+        grant_id: str,
+        execution_attempt_id: str,
+        request: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        _require(
+            _closed(receipt, _HOST_RECEIPT_FIELDS)
+            and receipt.get("schema") == "host-capability-invocation-receipt@1"
+            and receipt.get("invocation_status") == "completed"
+            and _nonempty(receipt.get("result_json"))
+            and _is_sha256(receipt.get("result_sha256"))
+            and _nonempty(receipt.get("external_durable_receipt_ref"))
+            and _nonempty_string_list(receipt.get("host_coverage_limits")),
+            "CAPABILITY_INVOCATION_RECEIPT_INVALID",
+        )
+        request_bytes = _canonical_bytes(request)
+        _require(
+            receipt.get("host_binding") == _host_binding_payload(binding)
+            and receipt.get("issue_catalog_sha256") == issue_catalog_sha256
+            and receipt.get("execute_catalog_sha256") == execute_catalog_sha256
+            and receipt.get("member_binding") == member
+            and receipt.get("grant_id") == grant_id
+            and receipt.get("execution_attempt_id") == execution_attempt_id
+            and receipt.get("request_id") == request.get("request_id")
+            and receipt.get("request_sha256") == hashlib.sha256(request_bytes).hexdigest()
+            and receipt.get("returned_control_point") == request.get("return_point"),
+            "CAPABILITY_INVOCATION_BINDING_MISMATCH",
+        )
+        try:
+            result = json.loads(str(receipt["result_json"]))
+        except json.JSONDecodeError as error:
+            raise ControllerError("CAPABILITY_INVOCATION_RECEIPT_INVALID") from error
+        _require(isinstance(result, dict), "CAPABILITY_INVOCATION_RECEIPT_INVALID")
+        result_bytes = _canonical_bytes(result)
+        _require(
+            str(receipt["result_json"]).encode("utf-8") == result_bytes
+            and receipt["result_sha256"] == hashlib.sha256(result_bytes).hexdigest(),
+            "CAPABILITY_INVOCATION_RECEIPT_INVALID",
+        )
+        return deepcopy(result), deepcopy(dict(receipt))
+
+    def _execute_host_capability(self, binding: HostBinding, grant_id: str) -> dict[str, Any]:
+        registry = self._host_registry()
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        unknown_marker = _capability_effect_unknown_marker(manifest)
+        if unknown_marker is not None:
+            raise ControllerError(unknown_marker)
+        record = self._capability_record(manifest, grant_id)
+        if record.get("result") is not None:
+            raise ControllerError("CAPABILITY_RESULT_REPLAY")
+        if record.get("execution_state") == "in_progress":
+            raise ControllerError("CAPABILITY_EXECUTION_IN_PROGRESS")
+        if record.get("execution_state") != "pending":
+            raise ControllerError("CAPABILITY_GRANT_NOT_PENDING")
+        grant = record.get("grant")
+        request = record.get("request")
+        _require(isinstance(grant, Mapping) and isinstance(request, Mapping), "CAPABILITY_REQUEST_INVALID")
+        need = self._durable_capability_need(manifest, manifest.revision)
+        member = grant.get("member_binding")
+        output_contract = member.get("output_contract") if isinstance(member, Mapping) else None
+        scope = grant.get("evidence_scope")
+        _require(
+            _closed(member, _HOST_MEMBER_FIELDS)
+            and isinstance(output_contract, Mapping)
+            and isinstance(scope, list)
+            and len(scope) == 1
+            and grant.get("grant_id") == grant_id
+            and grant.get("mission_id") == manifest.mission_id
+            and grant.get("mission_revision") == manifest.revision
+            and grant.get("admitted_operation") == _HOST_MEMBER_OPERATION
+            and grant.get("mutation") is False
+            and grant.get("need_id") == need["need_id"]
+            and grant.get("need_sha256") == _canonical_sha256(need)
+            and grant.get("blocking_condition") == need["blocking_condition"]
+            and grant.get("return_point") == need["return_point"]
+            and scope == need["evidence_scope"]
+            and _is_sha256(grant.get("issue_catalog_sha256"))
+            and set(request) == _CAPABILITY_REQUEST_FIELDS
+            and request.get("schema") == "capability-request@1"
+            and _nonempty(request.get("authority_receipt"))
+            and request.get("request_id") == grant.get("request_id")
+            and request.get("mission_id") == manifest.mission_id
+            and request.get("mission_revision") == manifest.revision
+            and request.get("capability_id") == member.get("capability_id")
+            and request.get("capability_source_sha256") == member.get("descriptor_sha256")
+            and request.get("bounded_question_or_action") == need["blocking_condition"]
+            and request.get("expected_output_contract") == output_contract.get("id")
+            and request.get("return_point") == need["return_point"]
+            and request.get("timeout_or_stop_condition") == need["timeout_or_stop_condition"]
+            and grant.get("request_sha256") == _canonical_sha256(request),
+            "CAPABILITY_REQUEST_INVALID",
+        )
+        execute_catalog_sha256, entries = self._observe_host_members(binding)
+        selected = self._select_host_member(entries, need)
+        if selected["member_binding"] != member:
+            raise ControllerError("CAPABILITY_DESCRIPTOR_MISMATCH")
+        authority_errors = authorize_action(manifest, str(member["capability_id"]), need["required_permissions"], need["expected_effects"], need["estimated_costs"])
+        if authority_errors:
+            raise ControllerError(authority_errors[0])
+        store = self._store(binding.workspace_root, manifest.mission_id)
+        try:
+            begun = apply_event_data(
+                manifest,
+                "begin_capability_execution",
+                "mission-steward:capability",
+                {"grant_id": grant_id, "operation": _HOST_MEMBER_OPERATION, "target": scope[0], "evidence_refs": list(scope), "execution_owner_id": self.process_instance_id},
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        store.save(begun)
+        execution_attempt_id = self._capability_record(begun, grant_id).get("execution_attempt_id")
+        _require(_nonempty(execution_attempt_id), "CAPABILITY_EXECUTION_STATE_INVALID")
+        request_bytes = _canonical_bytes(request)
+        try:
+            raw_receipt = registry.invoke_member_capability(binding, str(member["invocation_ref"]), grant_id, str(execution_attempt_id), request_bytes)
+        except Exception as error:
+            raise ControllerError("CAPABILITY_INVOCATION_UNAVAILABLE") from error
+        result, receipt = self._host_result_from_receipt(
+            raw_receipt,
+            binding=binding,
+            issue_catalog_sha256=str(grant["issue_catalog_sha256"]),
+            execute_catalog_sha256=execute_catalog_sha256,
+            member=member,
+            grant_id=grant_id,
+            execution_attempt_id=str(execution_attempt_id),
+            request=request,
+        )
+        try:
+            updated = apply_event_data(
+                begun,
+                "record_capability_result",
+                "capability:result",
+                {"grant_id": grant_id, "result": result, "host_invocation_receipt": receipt},
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        checkpoint = store.save(updated)
+        return {"status": "capability-executed", "grant_id": grant_id, "result": deepcopy(result), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
 
     def manifest_engage(
         self,
@@ -590,17 +1031,22 @@ class ManifestController:
     def manifest_capability_issue(
         self,
         *,
-        capability_id: str,
-        blocking_condition: str,
-        admitted_operation: str,
-        evidence_scope: list[str],
-        request: Mapping[str, Any],
+        capability_id: str | None = None,
+        blocking_condition: str | None = None,
+        admitted_operation: str | None = None,
+        evidence_scope: list[str] | None = None,
+        request: Mapping[str, Any] | None = None,
         _host_context_ref: str | None = None,
         _host_gate_ref: str | None = None,
     ) -> dict[str, Any]:
         binding = self._binding("manifest_capability_issue", _host_context_ref, _host_gate_ref)
         if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
             raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        selection_fields = (capability_id, blocking_condition, admitted_operation, evidence_scope, request)
+        if all(value is None for value in selection_fields):
+            return self._issue_host_capability(binding)
+        if any(value is None for value in selection_fields):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
         if not _nonempty(admitted_operation):
             raise ControllerError("OPERATION_NOT_READ_ONLY")
         if admitted_operation.startswith("web."):
@@ -744,8 +1190,8 @@ class ManifestController:
         self,
         *,
         grant_id: str,
-        operation: str,
-        target: str,
+        operation: str | None = None,
+        target: str | None = None,
         evidence_refs: list[str] | None = None,
         evidence_payload: Mapping[str, str] | None = None,
         _host_context_ref: str | None = None,
@@ -756,6 +1202,8 @@ class ManifestController:
             raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
         if not _nonempty(grant_id):
             raise ControllerError("CAPABILITY_GRANT_ID_REQUIRED")
+        if operation is None and target is None and evidence_refs is None and evidence_payload is None:
+            return self._execute_host_capability(binding, grant_id)
         if not _nonempty(operation):
             raise ControllerError("OPERATION_NOT_READ_ONLY")
         if operation.startswith("web."):

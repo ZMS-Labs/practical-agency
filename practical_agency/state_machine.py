@@ -215,6 +215,7 @@ _CAPABILITY_RESULT_ALLOWED_FIELDS = (
     _CAPABILITY_RESULT_REQUIRED_FIELDS | {"verdict"}
 )
 _CAPABILITY_RESULT_STATUSES = {"completed", "declined", "blocked", "failed"}
+_HOST_CAPABILITY_RECEIPT_FIELDS = {"schema", "host_binding", "issue_catalog_sha256", "execute_catalog_sha256", "member_binding", "grant_id", "execution_attempt_id", "request_id", "request_sha256", "invocation_status", "result_json", "result_sha256", "returned_control_point", "external_durable_receipt_ref", "host_coverage_limits"}
 
 
 def _canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
@@ -222,6 +223,10 @@ def _canonical_mapping_sha256(value: Mapping[str, Any]) -> str:
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
 def _validate_manifest_milestone_contract(
@@ -798,10 +803,15 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         state["next_action"] = f"external receipt required for {grant_id}"
 
     elif event.kind == "record_capability_result":
-        if set(payload) != {"grant_id", "result"}:
+        allowed_payloads = (
+            {"grant_id", "result"},
+            {"grant_id", "result", "host_invocation_receipt"},
+        )
+        if set(payload) not in allowed_payloads:
             raise TransitionError("CAPABILITY_RESULT_EVENT_INVALID")
         grant_id = payload.get("grant_id")
         result = payload.get("result")
+        host_receipt = payload.get("host_invocation_receipt")
         if not isinstance(grant_id, str) or not isinstance(result, Mapping):
             raise TransitionError("CAPABILITY_RESULT_REQUIRED")
         invoked = [item for item in data["capabilities"].get("invoked", []) if isinstance(item, Mapping) and item.get("grant_id") == grant_id]
@@ -811,6 +821,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         if record.get("result") is not None:
             raise TransitionError("CAPABILITY_RESULT_REPLAY")
         grant = record.get("grant")
+        request = record.get("request")
         if not isinstance(grant, Mapping) or result.get("returned_control_point") != grant.get("return_point"):
             raise TransitionError("CAPABILITY_RETURN_POINT_MISMATCH")
 
@@ -818,7 +829,6 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         if execution_state is not None:
             if execution_state != "in_progress":
                 raise TransitionError("CAPABILITY_GRANT_NOT_IN_PROGRESS")
-            request = record.get("request")
             artifact_refs = result.get("artifact_refs")
             coverage_limits = result.get("coverage_limits")
             verdict = result.get("verdict")
@@ -857,7 +867,48 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             if not isinstance(evidence_refs, list) or not evidence_refs:
                 raise TransitionError("CAPABILITY_EVIDENCE_REQUIRED")
 
+        external_receipt_ref: str | None = None
+        member_binding = grant.get("member_binding")
+        if member_binding is not None:
+            canonical_result = json.dumps(dict(result), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            host_binding = host_receipt.get("host_binding") if isinstance(host_receipt, Mapping) else None
+            host_coverage = host_receipt.get("host_coverage_limits") if isinstance(host_receipt, Mapping) else None
+            if (
+                not isinstance(request, Mapping)
+                or not isinstance(host_receipt, Mapping)
+                or set(host_receipt) != _HOST_CAPABILITY_RECEIPT_FIELDS
+                or host_receipt.get("schema") != "host-capability-invocation-receipt@1"
+                or not isinstance(host_binding, Mapping)
+                or set(host_binding) != {"session_id", "turn_id", "workspace_root", "context_nonce_sha256"}
+                or any(not isinstance(host_binding.get(field), str) or not host_binding[field].strip() for field in ("session_id", "turn_id", "workspace_root"))
+                or not _is_sha256(host_binding.get("context_nonce_sha256"))
+                or not _is_sha256(host_receipt.get("issue_catalog_sha256"))
+                or host_receipt.get("issue_catalog_sha256") != grant.get("issue_catalog_sha256")
+                or not _is_sha256(host_receipt.get("execute_catalog_sha256"))
+                or host_receipt.get("member_binding") != member_binding
+                or host_receipt.get("grant_id") != grant_id
+                or host_receipt.get("execution_attempt_id") != record.get("execution_attempt_id")
+                or host_receipt.get("request_id") != request.get("request_id")
+                or host_receipt.get("request_sha256") != _canonical_mapping_sha256(request)
+                or host_receipt.get("invocation_status") != "completed"
+                or host_receipt.get("result_json") != canonical_result
+                or host_receipt.get("result_sha256") != _canonical_mapping_sha256(result)
+                or host_receipt.get("returned_control_point") != request.get("return_point")
+                or not isinstance(host_coverage, list)
+                or not host_coverage
+                or any(not isinstance(item, str) or not item.strip() for item in host_coverage)
+                or not isinstance(host_receipt.get("external_durable_receipt_ref"), str)
+                or not host_receipt["external_durable_receipt_ref"].strip()
+            ):
+                raise TransitionError("CAPABILITY_INVOCATION_RECEIPT_INVALID")
+            external_receipt_ref = str(host_receipt["external_durable_receipt_ref"])
+            record["host_invocation_receipt"] = deepcopy(dict(host_receipt))
+        elif host_receipt is not None:
+            raise TransitionError("CAPABILITY_INVOCATION_RECEIPT_INVALID")
+
         record["result"] = deepcopy(dict(result))
+        if external_receipt_ref is not None:
+            _append_unique(continuity["durable_artifacts"], external_receipt_ref)
         _append_unique(continuity["durable_artifacts"], f"capability-result:{grant_id}")
         continuity["decisions"].append({"kind": "capability-result", "actor_ref": event.actor_ref, "grant_id": grant_id, "verdict": result.get("verdict"), "coverage_limits": deepcopy(result.get("coverage_limits", [])), "evidence_refs": deepcopy(evidence_refs)})
 
