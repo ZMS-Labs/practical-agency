@@ -51,6 +51,17 @@ class StateMachineTests(unittest.TestCase):
         with self.assertRaisesRegex(TransitionError, "AUTHORITY_REVOKED"):
             apply_event_data(revoked, "record_action", "mission-steward", {"action_ref": "artifact:1"})
 
+    def test_revocation_invalidates_outstanding_capability_grant(self) -> None:
+        manifest = self.active()
+        grant = {
+            "grant_id": "grant-1", "mission_id": manifest.mission_id,
+            "mission_revision": manifest.revision, "revoked": False,
+            "return_point": {"mission_id": manifest.mission_id, "revision": manifest.revision, "frontier_index": 0, "label": "obtain approval"},
+        }
+        requested = apply_event_data(manifest, "record_capability_request", "mission-steward", {"grant": grant, "request": {"bounded": "read"}})
+        revoked = apply_event_data(requested, "revoke", "operator:test", {"reason": "stop"})
+        self.assertTrue(revoked.capabilities["invoked"][0]["grant"]["revoked"])
+
     def test_amendments_append_without_replacing_instruction(self) -> None:
         original = self.draft()
         changed = apply_event_data(

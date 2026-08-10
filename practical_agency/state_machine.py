@@ -580,6 +580,9 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         state["status"] = MissionStatus.CANCELLED.value
         state["next_action"] = None
         _append_unique(state["blockers"], f"AUTHORITY_REVOKED:{reason}")
+        for invoked in data["capabilities"].get("invoked", []):
+            if isinstance(invoked, Mapping) and isinstance(invoked.get("grant"), Mapping):
+                invoked["grant"]["revoked"] = True
 
     elif event.kind == "cancel":
         _operator_only(manifest, event)
