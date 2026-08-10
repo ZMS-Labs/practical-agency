@@ -6,14 +6,44 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-10-host-member-implementation` |
+| Subject revision | `durable-capability-transaction-v1-stage-11-host-receipt-reconciliation-tests` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
-| Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
+| Baseline parent | `943e1fde12707da2a12d55e0821385d7e3aa3386` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T11:32:51Z` |
+| Prepared UTC | `2026-08-10T12:32:56Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0020-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0022-origin.md` |
+
+## Stage 11 superseding instructions
+
+Stage 10 is complete and verified. ChatGPT Pro's exact production relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0021-target.md`; its repository-side reserved
+host catalog/invoke/lookup consumer is applied. The focused host-member and durable transaction
+tests, the full 263-test suite with 2 skips, and all required repository gates pass at exact pushed
+commit `943e1fde12707da2a12d55e0821385d7e3aa3386`. Draft PR #10 remains open and unmerged.
+
+The current outbound request is Stage 11 tests only. Return exactly one smallest RED vertical-slice
+test proving replacement-process reconciliation from an already durable host-owned invocation
+receipt. The first controller must durably begin the host-member attempt, invoke the fake host
+member exactly once, and then die after the fake host has retained its completed receipt but before
+the local `record_capability_result` checkpoint. A fresh controller, given only pathless host
+bindings plus the same reserved fake registry, must engage the active mission, call
+`lookup_member_invocation(execution_attempt_id)`, validate the returned receipt through the same
+strict receipt/result bindings, persist the exact member-owned result and external receipt, and
+resume without invoking the member again or marking the effect unknown.
+
+The one test must also contain the smallest fail-closed control: when lookup returns `NONE` (or an
+unbound receipt, if that is materially smaller and stronger), engagement must retain the existing
+`CAPABILITY_EFFECT_UNKNOWN:<grant_id>` behavior, fabricate no result, and perform no reinvocation.
+Use a real replacement `ManifestController` and durable checkpoint discovery; patch only the fake
+registry or the narrow crash seam needed to plant the post-host/pre-local-checkpoint interruption.
+
+Do not implement production code, alter existing tests, invent a real Codex host adapter, accept
+caller paths/handles/results, enable web, integrate whole-mission proof, change principal handling,
+add shell/mutation, or claim tests were run. Return the complete relay envelope in exactly one
+fenced `text` block with no prose before or after it and no nested fences. Instructions for Stages
+1-10 below are historical context and are superseded by this section where they conflict.
 
 ## Stage 10 superseding instructions
 
