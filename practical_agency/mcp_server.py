@@ -21,6 +21,24 @@ STRING_LIST = {
     "minItems": 1,
     "items": {"type": "string", "minLength": 1},
 }
+CAPABILITY_INTENT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "bounded_question_or_action",
+        "requested_permissions",
+        "requested_effects",
+        "estimated_costs",
+        "timeout_or_stop_condition",
+    ],
+    "properties": {
+        "bounded_question_or_action": {"type": "string", "minLength": 1},
+        "requested_permissions": STRING_LIST,
+        "requested_effects": STRING_LIST,
+        "estimated_costs": STRING_LIST,
+        "timeout_or_stop_condition": {"type": "string", "minLength": 1},
+    },
+}
 DEFINITION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -81,7 +99,7 @@ TOOLS = [
     {
         "name": "manifest_capability_issue",
         "description": "Discover one current descriptor and issue one exact mission-bound grant.",
-        "inputSchema": _closed_schema({"capability_id": {"type": "string", "minLength": 1}, "blocking_condition": {"type": "string", "minLength": 1}, "admitted_operation": {"type": "string", "minLength": 1}, "evidence_scope": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "request": {"type": "object"}}, ("capability_id", "blocking_condition", "admitted_operation", "evidence_scope", "request")),
+        "inputSchema": _closed_schema({"capability_id": {"type": "string", "minLength": 1}, "blocking_condition": {"type": "string", "minLength": 1}, "admitted_operation": {"type": "string", "minLength": 1}, "evidence_scope": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "request": CAPABILITY_INTENT_SCHEMA}, ("capability_id", "blocking_condition", "admitted_operation", "evidence_scope", "request")),
     },
     {
         "name": "manifest_capability_execute",
