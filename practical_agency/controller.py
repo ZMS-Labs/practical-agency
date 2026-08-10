@@ -8,15 +8,23 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
+from practical_agency.authority import authorize_action
+from practical_agency.capability_discovery import (
+    CapabilityDescriptor,
+    FileSystemSkillProvider,
+    discover_capabilities,
+)
+from practical_agency.capability_grants import (
+    CapabilityGrantError,
+    issue_grant_from_descriptor,
+)
+from practical_agency.capability_operations import CapabilityOperationError, execute_read
 from practical_agency.checkpoint_store import (
     FileCheckpointStore,
     ReconciliationFinding,
     apply_reconciliation_findings,
 )
 from practical_agency.coordinator import CoordinationError, coordinate_once, dispatch_once
-from practical_agency.capability_operations import CapabilityOperationError, execute_read
-from practical_agency.capability_discovery import FileSystemSkillProvider, discover_capabilities
-from practical_agency.capability_grants import CapabilityGrantError, issue_grant_from_descriptor
 from practical_agency.filesystem_artifact import (
     FilesystemArtifactAdapter,
     FilesystemArtifactError,
@@ -69,6 +77,32 @@ _LIST_FIELDS = (
     "escalation_required_for",
     "stop_conditions",
 )
+_CAPABILITY_INTENT_FIELDS = {
+    "bounded_question_or_action",
+    "requested_permissions",
+    "requested_effects",
+    "estimated_costs",
+    "timeout_or_stop_condition",
+}
+_CAPABILITY_REQUEST_FIELDS = {
+    "schema",
+    "request_id",
+    "mission_id",
+    "mission_revision",
+    "capability_id",
+    "capability_source_sha256",
+    "bounded_question_or_action",
+    "authority_receipt",
+    "expected_output_contract",
+    "return_point",
+    "timeout_or_stop_condition",
+}
+_CAPABILITY_REQUEST_CONTRACT = "contracts/capability-request.schema.json"
+_CAPABILITY_RESULT_CONTRACT = "contracts/capability-result.schema.json"
+_READ_AUTHORITY = {
+    "file.read": ("repository:read", "bounded reads"),
+    "resource.read": ("repository:read", "bounded reads"),
+}
 
 
 def _canonical_sha256(value: Mapping[str, Any]) -> str:
@@ -80,6 +114,14 @@ def _canonical_sha256(value: Mapping[str, Any]) -> str:
 
 def _nonempty(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _nonempty_string_list(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(_nonempty(item) for item in value)
+    )
 
 
 def _sha256_text(value: str) -> str:
@@ -324,13 +366,22 @@ class ManifestController:
             workspace / "missions" / mission_id / "checkpoints"
         )
 
-    def _observed_descriptor(self, capability_id: object, descriptor_digest: object) -> None:
+    def _descriptor(self, capability_id: object) -> CapabilityDescriptor:
         descriptors = discover_capabilities([FileSystemSkillProvider(self.plugin_root / "skills")])
         matches = [item for item in descriptors if item.capability_id == capability_id]
         if len(matches) != 1 or matches[0].availability != "available":
             raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
-        if matches[0].source_sha256 != descriptor_digest:
+        return matches[0]
+
+    def _observed_descriptor(
+        self,
+        capability_id: object,
+        descriptor_digest: object,
+    ) -> CapabilityDescriptor:
+        descriptor = self._descriptor(capability_id)
+        if descriptor.source_sha256 != descriptor_digest:
             raise ControllerError("CAPABILITY_DESCRIPTOR_MISMATCH")
+        return descriptor
 
     def manifest_engage(
         self,
@@ -514,20 +565,124 @@ class ManifestController:
         binding = self._binding("manifest_capability_issue", _host_context_ref, _host_gate_ref)
         if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
             raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        if not _nonempty(admitted_operation):
+            raise ControllerError("OPERATION_NOT_READ_ONLY")
+        if admitted_operation.startswith("web."):
+            raise ControllerError("WEB_OPERATION_DISABLED")
+        authority_rule = _READ_AUTHORITY.get(admitted_operation)
+        if authority_rule is None:
+            raise ControllerError("OPERATION_NOT_READ_ONLY")
+        if (
+            not _nonempty(capability_id)
+            or not _nonempty(blocking_condition)
+            or not _nonempty_string_list(evidence_scope)
+            or len(evidence_scope) != 1
+        ):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+
         discovered = self._discover(binding.workspace_root)
-        descriptors = discover_capabilities([FileSystemSkillProvider(self.plugin_root / "skills")])
-        matches = [item for item in descriptors if item.capability_id == capability_id]
-        if len(matches) != 1 or matches[0].availability != "available":
-            raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
+        descriptor = self._descriptor(capability_id)
+        if (
+            descriptor.input_contract != _CAPABILITY_REQUEST_CONTRACT
+            or descriptor.output_contract != _CAPABILITY_RESULT_CONTRACT
+        ):
+            raise ControllerError("CAPABILITY_CONTRACT_MISMATCH")
+        if not isinstance(request, Mapping) or set(request) != _CAPABILITY_INTENT_FIELDS:
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+
+        permissions = request.get("requested_permissions")
+        effects = request.get("requested_effects")
+        costs = request.get("estimated_costs")
+        if (
+            not _nonempty(request.get("bounded_question_or_action"))
+            or not _nonempty(request.get("timeout_or_stop_condition"))
+            or not _nonempty_string_list(permissions)
+            or not _nonempty_string_list(effects)
+            or not _nonempty_string_list(costs)
+        ):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+
+        required_permissions = list(
+            dict.fromkeys([*descriptor.authority_required, authority_rule[0]])
+        )
+        if (
+            list(permissions) != required_permissions
+            or list(effects) != evidence_scope
+            or list(costs) != [authority_rule[1]]
+            or request.get("bounded_question_or_action")
+            != f"{admitted_operation}:{evidence_scope[0]}"
+        ):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+
         manifest = discovered.manifest
-        point = {"mission_id": manifest.mission_id, "revision": manifest.revision + 1, "frontier_index": 0, "label": manifest.state["current_frontier"][0]}
+        authority_errors = authorize_action(
+            manifest,
+            descriptor.capability_id,
+            required_permissions,
+            evidence_scope,
+            [authority_rule[1]],
+        )
+        if authority_errors:
+            raise ControllerError(authority_errors[0])
+
+        frontier = manifest.state.get("current_frontier")
+        if (
+            not isinstance(frontier, list)
+            or not frontier
+            or not _nonempty(frontier[0])
+        ):
+            raise ControllerError("CAPABILITY_RETURN_POINT_UNAVAILABLE")
+        point = {
+            "mission_id": manifest.mission_id,
+            "revision": manifest.revision + 1,
+            "frontier_index": 0,
+            "label": frontier[0],
+        }
         try:
-            grant = issue_grant_from_descriptor(matches[0], mission_id=manifest.mission_id, mission_revision=manifest.revision + 1, blocking_condition=blocking_condition, return_point=point, admitted_operation=admitted_operation, evidence_scope=evidence_scope)
+            grant = issue_grant_from_descriptor(
+                descriptor,
+                mission_id=manifest.mission_id,
+                mission_revision=manifest.revision + 1,
+                blocking_condition=blocking_condition,
+                return_point=point,
+                admitted_operation=admitted_operation,
+                evidence_scope=evidence_scope,
+            )
         except (CapabilityGrantError, IndexError) as error:
             raise ControllerError(str(error)) from error
-        updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})
+
+        request_id = f"capability-request:{grant['grant_id']}"
+        grant["request_id"] = request_id
+        canonical_request = {
+            "schema": "capability-request@1",
+            "request_id": request_id,
+            "mission_id": manifest.mission_id,
+            "mission_revision": manifest.revision + 1,
+            "capability_id": descriptor.capability_id,
+            "capability_source_sha256": descriptor.source_sha256,
+            "bounded_question_or_action": request["bounded_question_or_action"],
+            "authority_receipt": f"checkpoint-sha256:{discovered.receipt.sha256}",
+            "expected_output_contract": descriptor.output_contract,
+            "return_point": deepcopy(point),
+            "timeout_or_stop_condition": request["timeout_or_stop_condition"],
+        }
+        try:
+            updated = apply_event_data(
+                manifest,
+                "record_capability_request",
+                "mission-steward:capability",
+                {"grant": grant, "request": canonical_request},
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
         checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
-        return {"status": "capability-issued", "grant": grant, "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+        return {
+            "status": "capability-issued",
+            "grant_id": str(grant["grant_id"]),
+            "grant": deepcopy(grant),
+            "checkpoint_ref": checkpoint.path,
+            "checkpoint_sha256": checkpoint.sha256,
+        }
 
     def manifest_capability_result(
         self,
@@ -549,7 +704,7 @@ class ManifestController:
     def manifest_capability_execute(
         self,
         *,
-        grant: dict[str, Any],
+        grant_id: str,
         operation: str,
         target: str,
         evidence_refs: list[str] | None = None,
@@ -560,17 +715,167 @@ class ManifestController:
         binding = self._binding("manifest_capability_execute", _host_context_ref, _host_gate_ref)
         if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
             raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        if not _nonempty(grant_id):
+            raise ControllerError("CAPABILITY_GRANT_ID_REQUIRED")
+        if not _nonempty(operation):
+            raise ControllerError("OPERATION_NOT_READ_ONLY")
+        if operation.startswith("web."):
+            raise ControllerError("WEB_OPERATION_DISABLED")
+        authority_rule = _READ_AUTHORITY.get(operation)
+        if authority_rule is None:
+            raise ControllerError("OPERATION_NOT_READ_ONLY")
+
         discovered = self._discover(binding.workspace_root)
         manifest = discovered.manifest
+        records = [
+            item
+            for item in manifest.capabilities.get("invoked", [])
+            if isinstance(item, Mapping) and item.get("grant_id") == grant_id
+        ]
+        if len(records) != 1:
+            raise ControllerError("CAPABILITY_GRANT_NOT_FOUND")
+        record = records[0]
+        if record.get("result") is not None:
+            raise ControllerError("CAPABILITY_RESULT_REPLAY")
+        execution_state = record.get("execution_state")
+        if execution_state == "in_progress":
+            raise ControllerError("CAPABILITY_EXECUTION_IN_PROGRESS")
+        if execution_state != "pending":
+            raise ControllerError("CAPABILITY_GRANT_NOT_PENDING")
+
+        grant = record.get("grant")
+        request = record.get("request")
+        if not isinstance(grant, Mapping) or not isinstance(request, Mapping):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+        if grant.get("grant_id") != grant_id:
+            raise ControllerError("CAPABILITY_GRANT_ID_MISMATCH")
+        if grant.get("mission_id") != manifest.mission_id:
+            raise ControllerError("CAPABILITY_GRANT_MISSION_MISMATCH")
+        if grant.get("mission_revision") != manifest.revision:
+            raise ControllerError("GRANT_STALE")
+        if grant.get("admitted_operation") != operation:
+            raise ControllerError("GRANT_OPERATION_NOT_ADMITTED")
+
+        scope = grant.get("evidence_scope")
+        if (
+            not isinstance(scope, list)
+            or len(scope) != 1
+            or not all(_nonempty(item) for item in scope)
+        ):
+            raise ControllerError("CAPABILITY_GRANT_INVALID")
+        if target not in scope:
+            raise ControllerError("TARGET_NOT_IN_EVIDENCE_SCOPE")
+
+        if evidence_refs is None:
+            refs = [target]
+        elif _nonempty_string_list(evidence_refs):
+            refs = list(evidence_refs)
+        else:
+            raise ControllerError("GRANT_EVIDENCE_REQUIRED")
+        if any(ref not in scope for ref in refs):
+            raise ControllerError("GRANT_EVIDENCE_REQUIRED")
+
+        if (
+            set(request) != _CAPABILITY_REQUEST_FIELDS
+            or request.get("schema") != "capability-request@1"
+            or not _nonempty(request.get("request_id"))
+            or not _nonempty(request.get("authority_receipt"))
+            or not _nonempty(request.get("timeout_or_stop_condition"))
+            or request.get("request_id") != grant.get("request_id")
+            or request.get("mission_id") != manifest.mission_id
+            or request.get("mission_revision") != manifest.revision
+            or request.get("capability_id") != grant.get("capability_id")
+            or request.get("capability_source_sha256")
+            != grant.get("capability_descriptor_sha256")
+            or request.get("bounded_question_or_action")
+            != f"{operation}:{target}"
+            or request.get("expected_output_contract")
+            != _CAPABILITY_RESULT_CONTRACT
+            or request.get("return_point") != grant.get("return_point")
+        ):
+            raise ControllerError("CAPABILITY_REQUEST_INVALID")
+
+        descriptor = self._observed_descriptor(
+            grant.get("capability_id"),
+            grant.get("capability_descriptor_sha256"),
+        )
+        if (
+            descriptor.input_contract != _CAPABILITY_REQUEST_CONTRACT
+            or descriptor.output_contract != _CAPABILITY_RESULT_CONTRACT
+        ):
+            raise ControllerError("CAPABILITY_CONTRACT_MISMATCH")
+        required_permissions = list(
+            dict.fromkeys([*descriptor.authority_required, authority_rule[0]])
+        )
+        authority_errors = authorize_action(
+            manifest,
+            descriptor.capability_id,
+            required_permissions,
+            scope,
+            [authority_rule[1]],
+        )
+        if authority_errors:
+            raise ControllerError(authority_errors[0])
+
+        execution_grant = deepcopy(dict(grant))
+        store = self._store(binding.workspace_root, manifest.mission_id)
         try:
-            result = execute_read(grant, mission_id=manifest.mission_id, mission_revision=manifest.revision,
-                                  operation=operation, target=target, workspace=binding.workspace_root,
-                                  evidence_refs=evidence_refs, evidence_payload=evidence_payload)
+            begun = apply_event_data(
+                manifest,
+                "begin_capability_execution",
+                "mission-steward:capability",
+                {
+                    "grant_id": grant_id,
+                    "operation": operation,
+                    "target": target,
+                    "evidence_refs": refs,
+                },
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        store.save(begun)
+
+        try:
+            observed = execute_read(
+                execution_grant,
+                mission_id=manifest.mission_id,
+                mission_revision=manifest.revision,
+                operation=operation,
+                target=target,
+                workspace=binding.workspace_root,
+                evidence_refs=refs,
+                evidence_payload=evidence_payload,
+            )
         except CapabilityOperationError as error:
             raise ControllerError(str(error)) from error
-        updated = apply_event_data(manifest, "record_capability_result", "capability:result", {"grant_id": grant.get("grant_id"), "result": result})
-        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
-        return {"status": "capability-executed", "result": result, "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+
+        result = {
+            "schema": "capability-result@1",
+            "request_id": request["request_id"],
+            "status": "completed",
+            "verdict": observed.get("verdict"),
+            "artifact_refs": refs,
+            "observed_effects": deepcopy(observed["observed_effects"]),
+            "returned_control_point": deepcopy(request["return_point"]),
+            "coverage_limits": list(observed["coverage_limits"]),
+        }
+        try:
+            updated = apply_event_data(
+                begun,
+                "record_capability_result",
+                "capability:result",
+                {"grant_id": grant_id, "result": result},
+            )
+        except TransitionError as error:
+            raise ControllerError(str(error)) from error
+        checkpoint = store.save(updated)
+        return {
+            "status": "capability-executed",
+            "grant_id": grant_id,
+            "result": deepcopy(result),
+            "checkpoint_ref": checkpoint.path,
+            "checkpoint_sha256": checkpoint.sha256,
+        }
 
     def manifest_clarify(
         self,
@@ -1277,6 +1582,7 @@ class ManifestController:
         *,
         acceptor_ref: str,
         verdict: str,
+        reason: str | None = None,
         separation_assurance: str,
         principal_evidence_ref: str | None = None,
         _host_context_ref: str | None = None,
@@ -1321,6 +1627,35 @@ class ManifestController:
             "separation_assurance": separation_assurance,
             "principal_evidence_ref": principal_evidence_ref,
         }
+        if verdict in {"FAIL", "INCONCLUSIVE"}:
+            try:
+                rejected = apply_event_data(
+                    manifest,
+                    "reject",
+                    acceptor_ref,
+                    {**acceptance_data, "reason": reason},
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            checkpoint = self._store(
+                binding.workspace_root, rejected.mission_id
+            ).save(rejected)
+            return {
+                "status": "rejected",
+                **_status_summary(rejected),
+                "mission_id": rejected.mission_id,
+                "revision": rejected.revision,
+                "mission_status": rejected.state["status"],
+                "verdict": verdict,
+                "reason": reason,
+                "evidence_refs": list(acceptance_data["evidence_refs"]),
+                "separation_assurance": separation_assurance,
+                "coverage_limits": coverage_limits,
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "process_instance_id": self.process_instance_id,
+            }
+
         if _active_milestone_record(manifest) is not None:
             try:
                 continued = apply_event_data(

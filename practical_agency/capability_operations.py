@@ -90,6 +90,13 @@ def execute_read(
         raise CapabilityOperationError("SOURCE_EVIDENCE_REQUIRED")
     if operation.startswith("web.") and (not evidence_payload or not all(ref in evidence_payload for ref in refs)):
         raise CapabilityOperationError("SOURCE_BYTES_REQUIRED")
+    try:
+        result = consume_grant(
+            grant, mission_id=mission_id, mission_revision=mission_revision,
+            operation=operation, evidence_refs=refs or [f"file:{target}"],
+        )
+    except CapabilityGrantError as error:
+        raise CapabilityOperationError(str(error)) from error
     observed: list[dict[str, Any]] = []
     if operation in {"file.read", "resource.read"}:
         root = workspace.resolve()
@@ -109,12 +116,5 @@ def execute_read(
         if target not in scope:
             raise CapabilityOperationError("TARGET_NOT_IN_EVIDENCE_SCOPE")
         observed.append({"target": target, "response": response, "source_evidence": refs, "evidence_records":[{"ref": ref, "sha256": hashlib.sha256(evidence_payload[ref].encode("utf-8")).hexdigest()} for ref in refs], "mutation": False})
-    try:
-        result = consume_grant(
-            grant, mission_id=mission_id, mission_revision=mission_revision,
-            operation=operation, evidence_refs=refs or [f"file:{target}"],
-        )
-    except CapabilityGrantError as error:
-        raise CapabilityOperationError(str(error)) from error
     result["observed_effects"] = observed
     return result

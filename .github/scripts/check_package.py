@@ -25,9 +25,7 @@ FRONTMATTER = re.compile(r"\A---\r?\n(?P<body>.*?)\r?\n---(?:\r?\n|\Z)", re.S)
 DESCRIPTION_BUDGET_BYTES = 420
 CODEX_TOOL_NAMES = [
     "manifest_engage",
-    "manifest_capability_request",
     "manifest_capability_issue",
-    "manifest_capability_result",
     "manifest_capability_execute",
     "manifest_clarify",
     "manifest_define",

@@ -79,24 +79,14 @@ TOOLS = [
         "inputSchema": _closed_schema({}),
     },
     {
-        "name": "manifest_capability_request",
-        "description": "Record one exact mission-bound non-mutating capability grant and request.",
-        "inputSchema": _closed_schema({"grant": {"type": "object"}, "request": {"type": "object"}}, ("grant", "request")),
-    },
-    {
         "name": "manifest_capability_issue",
         "description": "Discover one current descriptor and issue one exact mission-bound grant.",
         "inputSchema": _closed_schema({"capability_id": {"type": "string", "minLength": 1}, "blocking_condition": {"type": "string", "minLength": 1}, "admitted_operation": {"type": "string", "minLength": 1}, "evidence_scope": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}, "request": {"type": "object"}}, ("capability_id", "blocking_condition", "admitted_operation", "evidence_scope", "request")),
     },
     {
-        "name": "manifest_capability_result",
-        "description": "Record a typed result for one previously granted capability request.",
-        "inputSchema": _closed_schema({"grant_id": {"type": "string", "minLength": 1}, "result": {"type": "object"}}, ("grant_id", "result")),
-    },
-    {
         "name": "manifest_capability_execute",
-        "description": "Execute exactly one granted non-mutating file, resource, or declared web read.",
-        "inputSchema": _closed_schema({"grant": {"type": "object"}, "operation": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "evidence_refs": {"type": "array", "items": {"type": "string"}}, "evidence_payload": {"type": "object"}}, ("grant", "operation", "target")),
+        "description": "Execute one canonical durable grant exactly once and record its typed result.",
+        "inputSchema": _closed_schema({"grant_id": {"type": "string", "minLength": 1}, "operation": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "evidence_refs": {"type": "array", "items": {"type": "string"}}, "evidence_payload": {"type": "object"}}, ("grant_id", "operation", "target")),
     },
     {
         "name": "manifest_clarify",
@@ -142,6 +132,7 @@ TOOLS = [
             {
                 "acceptor_ref": {"type": "string", "minLength": 1},
                 "verdict": {"type": "string", "enum": ["PASS", "FAIL", "INCONCLUSIVE"]},
+                "reason": {"type": "string", "minLength": 1},
                 "separation_assurance": {
                     "type": "string",
                     "enum": ["declared-role-separation", "externally-proven"],
