@@ -14,6 +14,7 @@ from practical_agency.checkpoint_store import (
     apply_reconciliation_findings,
 )
 from practical_agency.coordinator import CoordinationError, coordinate_once, dispatch_once
+from practical_agency.capability_operations import CapabilityOperationError, execute_read
 from practical_agency.filesystem_artifact import (
     FilesystemArtifactAdapter,
     FilesystemArtifactError,
@@ -502,6 +503,31 @@ class ManifestController:
         updated = apply_event_data(manifest, "record_capability_result", "capability:result", {"grant_id": grant_id, "result": result})
         checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
         return {"status": "capability-result-recorded", "grant_id": grant_id, "result": deepcopy(dict(result)), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+
+    def manifest_capability_execute(
+        self,
+        *,
+        grant: dict[str, Any],
+        operation: str,
+        target: str,
+        evidence_refs: list[str] | None = None,
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_capability_execute", _host_context_ref, _host_gate_ref)
+        if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
+            raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        try:
+            result = execute_read(grant, mission_id=manifest.mission_id, mission_revision=manifest.revision,
+                                  operation=operation, target=target, workspace=binding.workspace_root,
+                                  evidence_refs=evidence_refs)
+        except CapabilityOperationError as error:
+            raise ControllerError(str(error)) from error
+        updated = apply_event_data(manifest, "record_capability_result", "capability:result", {"grant_id": grant.get("grant_id"), "result": result})
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "capability-executed", "result": result, "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
 
     def manifest_clarify(
         self,

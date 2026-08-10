@@ -89,6 +89,11 @@ TOOLS = [
         "inputSchema": _closed_schema({"grant_id": {"type": "string", "minLength": 1}, "result": {"type": "object"}}, ("grant_id", "result")),
     },
     {
+        "name": "manifest_capability_execute",
+        "description": "Execute exactly one granted non-mutating file, resource, or declared web read.",
+        "inputSchema": _closed_schema({"grant": {"type": "object"}, "operation": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "evidence_refs": {"type": "array", "items": {"type": "string"}}}, ("grant", "operation", "target")),
+    },
+    {
         "name": "manifest_clarify",
         "description": "Append an operator clarification without replacing mission intent.",
         "inputSchema": _closed_schema({"clarification": {"type": "string", "minLength": 1}}, ("clarification",)),

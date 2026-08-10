@@ -5,6 +5,7 @@ import unittest
 from practical_agency.capability_grants import (
     CapabilityGrantError,
     consume_grant,
+    issue_grant_from_descriptor,
     issue_grant,
 )
 
@@ -45,6 +46,16 @@ class CapabilityGrantTests(unittest.TestCase):
         with self.assertRaisesRegex(CapabilityGrantError, "GRANT_REPLAYED"):
             consume_grant(grant, mission_id="mission-1", mission_revision=7,
                           operation="file.read", evidence_refs=["file:docs/evidence.md"])
+
+    def test_grant_identity_comes_from_discovered_descriptor(self):
+        descriptor = type("Descriptor", (), {"capability_id": "dynamic-reader", "source_sha256": "c" * 64})()
+        grant = issue_grant_from_descriptor(
+            descriptor, mission_id="mission-1", mission_revision=7,
+            blocking_condition="inspect", return_point=self._grant()["return_point"],
+            admitted_operation="file.read", evidence_scope=["file:docs/evidence.md"],
+        )
+        self.assertEqual(grant["capability_id"], "dynamic-reader")
+        self.assertEqual(grant["capability_descriptor_sha256"], "c" * 64)
 
     def test_stale_cross_mission_and_ungranted_operations_refuse(self):
         grant = issue_grant(self._grant())
