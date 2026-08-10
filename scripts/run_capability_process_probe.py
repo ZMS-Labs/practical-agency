@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +18,17 @@ from practical_agency.checkpoint_store import FileCheckpointStore
 from practical_agency.mission_repository import discover_active_mission
 from practical_agency.state_machine import apply_event_data
 from tests.helpers import record_fixture_verifier_result
+
+
+def web_evidence() -> dict[str, str]:
+    url = "https://www.example.com/"
+    request = urllib.request.Request(url, headers={"User-Agent": "practical-agency-proof/1"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        final_url = str(response.geturl())
+        body = response.read().decode("utf-8")
+    if final_url != url:
+        raise RuntimeError("WEB_SCOPE_REDIRECT")
+    return {"source:" + url: body}
 
 
 def refs(workspace: Path, root: Path, operation: str, turn: str, prompt: str = "$manifest probe") -> dict[str, str]:
@@ -33,7 +45,9 @@ def child(root: Path, workspace: Path, phase: str) -> None:
         controller.manifest_authorize(authority_contract_sha256=defined["authority_contract_sha256"], **refs(workspace, root, "manifest_authorize", "authorize", f"$manifest approve manifest {defined['authority_contract_sha256']}"))
         return
     index = int(phase.split("-")[1])
-    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"],{"source:https://example.test/source":"Example Domain"}))
+    web = web_evidence()
+    web_url = next(iter(web)).removeprefix("source:")
+    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))
     operation, target, scope, evidence, payload = cases[index]
     if phase.startswith("issue"):
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"process-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))

@@ -4,6 +4,7 @@ import json
 import shutil
 import sys
 import tempfile
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,15 @@ if str(ROOT) not in sys.path:
 
 from practical_agency.controller import ManifestController
 from practical_agency.host_evidence import write_host_context, write_host_gate
+
+
+def web_evidence() -> dict[str, str]:
+    url = "https://www.example.com/"
+    request = urllib.request.Request(url, headers={"User-Agent": "practical-agency-proof/1"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        if str(response.geturl()) != url:
+            raise RuntimeError("WEB_SCOPE_REDIRECT")
+        return {"source:" + url: response.read().decode("utf-8")}
 
 
 def refs(workspace: Path, root: Path, operation: str, turn: str, prompt: str = "$manifest probe") -> dict[str, str]:
@@ -35,7 +45,8 @@ with tempfile.TemporaryDirectory(prefix="pa-capability-live-") as temp:
     defined = controller.manifest_define(definition=definition, **refs(workspace, root, "manifest_define", "define"))
     controller.manifest_authorize(authority_contract_sha256=defined["authority_contract_sha256"], **refs(workspace, root, "manifest_authorize", "authorize", f"$manifest approve manifest {defined['authority_contract_sha256']}"))
     results = []
-    for index, (operation, target, scope, evidence, payload) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"],{"source:https://example.test/source":"Example Domain"}))):
+    web = web_evidence(); web_url = next(iter(web)).removeprefix("source:")
+    for index, (operation, target, scope, evidence, payload) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))):
         controller = ManifestController(plugin_root=root)
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"probe-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))
         controller = ManifestController(plugin_root=root)
