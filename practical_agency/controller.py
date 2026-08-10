@@ -509,9 +509,9 @@ class ManifestController:
         if len(matches) != 1 or matches[0].availability != "available":
             raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
         manifest = discovered.manifest
-        point = {"mission_id": manifest.mission_id, "revision": manifest.revision, "frontier_index": 0, "label": manifest.state["current_frontier"][0]}
+        point = {"mission_id": manifest.mission_id, "revision": manifest.revision + 1, "frontier_index": 0, "label": manifest.state["current_frontier"][0]}
         try:
-            grant = issue_grant_from_descriptor(matches[0], mission_id=manifest.mission_id, mission_revision=manifest.revision, blocking_condition=blocking_condition, return_point=point, admitted_operation=admitted_operation, evidence_scope=evidence_scope)
+            grant = issue_grant_from_descriptor(matches[0], mission_id=manifest.mission_id, mission_revision=manifest.revision + 1, blocking_condition=blocking_condition, return_point=point, admitted_operation=admitted_operation, evidence_scope=evidence_scope)
         except (CapabilityGrantError, IndexError) as error:
             raise ControllerError(str(error)) from error
         updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})

@@ -608,7 +608,7 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         request = payload.get("request")
         if not isinstance(grant, Mapping) or not isinstance(request, Mapping):
             raise TransitionError("CAPABILITY_REQUEST_REQUIRED")
-        if grant.get("mission_id") != manifest.mission_id or grant.get("mission_revision") != manifest.revision:
+        if grant.get("mission_id") != manifest.mission_id or grant.get("mission_revision") not in {manifest.revision, manifest.revision + 1}:
             raise TransitionError("CAPABILITY_GRANT_MISSION_MISMATCH")
         grant_id = grant.get("grant_id")
         if not isinstance(grant_id, str) or not grant_id:
