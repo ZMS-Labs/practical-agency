@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="pa-capability-live-") as temp:
     controller.manifest_authorize(authority_contract_sha256=defined["authority_contract_sha256"], **refs(workspace, root, "manifest_authorize", "authorize", f"$manifest approve manifest {defined['authority_contract_sha256']}"))
     results = []
     web = web_evidence(); web_url = next(iter(web)).removeprefix("source:")
-    for index, (operation, target, scope, evidence, payload) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))):
+    for index, (operation, target, scope, evidence, payload) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","resource:evidence.txt",["resource:evidence.txt"],["resource:evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))):
         controller = ManifestController(plugin_root=root)
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"probe-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))
         controller = ManifestController(plugin_root=root)

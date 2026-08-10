@@ -47,7 +47,7 @@ def child(root: Path, workspace: Path, phase: str) -> None:
     index = int(phase.split("-")[1])
     web = web_evidence()
     web_url = next(iter(web)).removeprefix("source:")
-    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))
+    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","resource:evidence.txt",["resource:evidence.txt"],["resource:evidence.txt"],{}),("web.open",web_url,[web_url,*web],[*web],web))
     operation, target, scope, evidence, payload = cases[index]
     if phase.startswith("issue"):
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"process-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))

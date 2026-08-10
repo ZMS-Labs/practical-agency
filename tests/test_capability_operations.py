@@ -23,21 +23,23 @@ class CapabilityOperationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "evidence.txt").write_text("proof", encoding="utf-8")
-            for operation in ("file.read", "resource.read"):
-                grant = self._grant(operation, "evidence.txt")
+            for operation, target in (("file.read", "evidence.txt"), ("resource.read", "resource:evidence.txt")):
+                grant = self._grant(operation, target)
                 result = execute_read(grant, mission_id="m1", mission_revision=2,
-                                      operation=operation, target="evidence.txt", workspace=root,
-                                      evidence_refs=["evidence.txt"])
+                                      operation=operation, target=target, workspace=root,
+                                      evidence_refs=[target])
                 self.assertEqual(result["verdict"], "PASS")
                 self.assertEqual(result["observed_effects"][0]["content"], "proof")
 
     def test_declared_web_read_requires_retained_source_evidence(self):
         grant = self._grant("web.open", "https://example.test/source")
         grant["evidence_scope"].append("source:https://example.test/source")
-        result = execute_read(grant, mission_id="m1", mission_revision=2,
-                              operation="web.open", target="https://example.test/source",
-                              workspace=Path("."), evidence_refs=["source:https://example.test/source"],
-                              evidence_payload={"source:https://example.test/source": "Example Domain"})
+        from unittest.mock import patch
+        with patch("practical_agency.capability_operations._retrieve_web", return_value={"url":"https://example.test/source", "retrieved_at":"2026-08-09T00:00:00Z", "status":200, "content":"Example Domain", "content_sha256":"a" * 64}):
+            result = execute_read(grant, mission_id="m1", mission_revision=2,
+                                  operation="web.open", target="https://example.test/source",
+                                  workspace=Path("."), evidence_refs=["source:https://example.test/source"],
+                                  evidence_payload={"source:https://example.test/source": "Example Domain"})
         self.assertEqual(result["verdict"], "PASS")
         with self.assertRaisesRegex(CapabilityOperationError, "SOURCE_EVIDENCE_REQUIRED"):
             execute_read(self._grant("web.open", "https://example.test/source"), mission_id="m1", mission_revision=2,

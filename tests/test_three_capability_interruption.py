@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import nullcontext as _null_context
+from unittest.mock import patch
 from pathlib import Path
 
 from practical_agency.capability_grants import issue_grant
@@ -23,7 +25,7 @@ class ThreeCapabilityInterruptionTests(unittest.TestCase):
             manifest = apply_event_data(manifest, "approve", "operator:test", {"checkpoint_ref": "checkpoint:1"})
             cases = [
                 ("file.read", "evidence.txt", ["evidence.txt"]),
-                ("resource.read", "evidence.txt", ["evidence.txt"]),
+                ("resource.read", "resource:evidence.txt", ["resource:evidence.txt"]),
                 ("web.open", "https://example.test/source", ["https://example.test/source", "source:https://example.test/source"]),
             ]
             for index, (operation, target, evidence_scope) in enumerate(cases):
@@ -38,7 +40,8 @@ class ThreeCapabilityInterruptionTests(unittest.TestCase):
                 manifest = apply_event_data(manifest, "record_capability_request", "mission-steward", {"grant": grant, "request": {"operation": operation}})
                 # Simulate interruption: the next operation uses the reloaded manifest object.
                 reloaded = MissionManifest.from_dict(manifest.to_dict())
-                result = execute_read(grant, mission_id=reloaded.mission_id, mission_revision=grant["mission_revision"], operation=operation, target=target, workspace=root, evidence_refs=evidence_scope[1:] if operation == "web.open" else [target], evidence_payload={"source:https://example.test/source":"Example Domain"} if operation == "web.open" else None)
+                with patch("practical_agency.capability_operations._retrieve_web", return_value={"url": target, "retrieved_at": "2026-08-09T00:00:00Z", "status": 200, "content": "Example Domain", "content_sha256": "a" * 64}) if operation == "web.open" else _null_context():
+                    result = execute_read(grant, mission_id=reloaded.mission_id, mission_revision=grant["mission_revision"], operation=operation, target=target, workspace=root, evidence_refs=evidence_scope[1:] if operation == "web.open" else [target], evidence_payload={"source:https://example.test/source":"Example Domain"} if operation == "web.open" else None)
                 manifest = apply_event_data(reloaded, "record_capability_result", "capability:result", {"grant_id": grant["grant_id"], "result": result})
                 self.assertEqual(manifest.capabilities["invoked"][-1]["result"]["verdict"], "PASS")
             self.assertEqual(len(manifest.capabilities["invoked"]), 3)

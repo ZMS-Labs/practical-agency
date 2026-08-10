@@ -324,6 +324,14 @@ class ManifestController:
             workspace / "missions" / mission_id / "checkpoints"
         )
 
+    def _observed_descriptor(self, capability_id: object, descriptor_digest: object) -> None:
+        descriptors = discover_capabilities([FileSystemSkillProvider(self.plugin_root / "skills")])
+        matches = [item for item in descriptors if item.capability_id == capability_id]
+        if len(matches) != 1 or matches[0].availability != "available":
+            raise ControllerError("CAPABILITY_DESCRIPTOR_UNAVAILABLE")
+        if matches[0].source_sha256 != descriptor_digest:
+            raise ControllerError("CAPABILITY_DESCRIPTOR_MISMATCH")
+
     def manifest_engage(
         self,
         *,
@@ -482,6 +490,9 @@ class ManifestController:
         if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
             raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
         discovered = self._discover(binding.workspace_root)
+        self._observed_descriptor(
+            grant.get("capability_id"), grant.get("capability_descriptor_sha256")
+        )
         manifest = discovered.manifest
         if grant.get("mission_id") != manifest.mission_id or grant.get("mission_revision") != manifest.revision:
             raise ControllerError("CAPABILITY_GRANT_MISSION_MISMATCH")
