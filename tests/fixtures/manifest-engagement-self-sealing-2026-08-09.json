@@ -1,0 +1,20 @@
+{
+  "schema": "incident-fixture@1",
+  "incident": "manifest-engagement-self-sealing",
+  "mission_id": "climb-pa-0-1",
+  "mission_revision": 37,
+  "checkpoint_sha256": "daaded14c02bf1e77311610702e869f6d7cf831caac00de2a428b953f7596cf5",
+  "failure_sequence": [
+    "MANIFEST_ENGAGEMENT_LOCKED",
+    "HOST_GATE_UNAVAILABLE",
+    "HOST_GATE_UNAVAILABLE",
+    "HOST_GATE_UNAVAILABLE"
+  ],
+  "root_cause": "manifest_engage could not bootstrap missing host evidence while the lock denied competing tools",
+  "required_invariants": [
+    "controller-only bootstrap",
+    "no arbitrary shell adapter",
+    "broker-only consequential mutation",
+    "append-only mission state"
+  ]
+}

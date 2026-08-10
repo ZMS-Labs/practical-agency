@@ -120,6 +120,35 @@ def handle(event: Mapping[str, Any]) -> dict[str, Any]:
         context = load_host_context(context_ref, plugin_root=PLUGIN_ROOT)
     except HostEvidenceError:
         if _controller_tool(tool_name):
+            if tool_name == "mcp__practical_agency__manifest_engage":
+                context_ref = write_host_context(
+                    workspace_root=workspace,
+                    prompt="$manifest engagement bootstrap",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    plugin_root=PLUGIN_ROOT,
+                )
+                context = load_host_context(context_ref.path, plugin_root=PLUGIN_ROOT)
+                gate = write_host_gate(
+                    context_ref=context_ref.path,
+                    tool_name=tool_name,
+                    tool_use_id=tool_use_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    workspace_root=workspace,
+                    lock_reason="bootstrap-recovery",
+                    decision="allow-controller",
+                    plugin_root=PLUGIN_ROOT,
+                )
+                updated = dict(raw_input)
+                updated["_host_context_ref"] = context_ref.path
+                updated["_host_gate_ref"] = gate.path
+                return _hook_output(
+                    event_name,
+                    decision="allow",
+                    reason="PRACTICAL_AGENCY_BOOTSTRAP_ALLOWED",
+                    updated_input=updated,
+                )
             return _hook_output(
                 event_name,
                 decision="deny",

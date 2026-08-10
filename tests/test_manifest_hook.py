@@ -102,6 +102,36 @@ class ManifestHookTests(unittest.TestCase):
             self.assertTrue(Path(updated["_host_context_ref"]).is_file())
             self.assertTrue(Path(updated["_host_gate_ref"]).is_file())
 
+    def test_engage_bootstraps_missing_host_context_without_unlocking_other_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = self._workspace(temp)
+            completed = self._run_hook(
+                {
+                    "hook_event_name": "PreToolUse",
+                    "cwd": str(workspace),
+                    "session_id": "session-bootstrap",
+                    "turn_id": "turn-bootstrap",
+                    "tool_name": "mcp__practical_agency__manifest_engage",
+                    "tool_use_id": "tool-bootstrap",
+                    "tool_input": {},
+                }
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            output = json.loads(completed.stdout)["hookSpecificOutput"]
+            self.assertEqual(output["permissionDecision"], "allow")
+            self.assertEqual(output["permissionDecisionReason"], "PRACTICAL_AGENCY_BOOTSTRAP_ALLOWED")
+            self.assertTrue(Path(output["updatedInput"]["_host_context_ref"]).is_file())
+            self.assertTrue(Path(output["updatedInput"]["_host_gate_ref"]).is_file())
+
+            denied = self._run_hook({
+                "hook_event_name": "PreToolUse", "cwd": str(workspace),
+                "session_id": "session-bootstrap", "turn_id": "turn-bootstrap",
+                "tool_name": "shell_command", "tool_use_id": "tool-shell",
+                "tool_input": {"command": "git status"},
+            })
+            self.assertEqual(json.loads(denied.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_locked_engagement_denies_competing_local_tools(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             workspace = self._workspace(temp)
