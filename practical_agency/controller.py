@@ -467,6 +467,58 @@ class ManifestController:
             "process_instance_id": self.process_instance_id,
         }
 
+    def manifest_capability_request(
+        self,
+        *,
+        grant: Mapping[str, Any],
+        request: Mapping[str, Any],
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_capability_request", _host_context_ref, _host_gate_ref)
+        if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
+            raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        if grant.get("mission_id") != manifest.mission_id or grant.get("mission_revision") != manifest.revision:
+            raise ControllerError("CAPABILITY_GRANT_MISSION_MISMATCH")
+        updated = apply_event_data(manifest, "record_capability_request", "mission-steward:capability", {"grant": grant, "request": request})
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "capability-requested", "grant": deepcopy(dict(grant)), "request": deepcopy(dict(request)), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256, "return_point": deepcopy(dict(grant["return_point"]))}
+
+    def manifest_capability_result(
+        self,
+        *,
+        grant_id: str,
+        result: Mapping[str, Any],
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_capability_result", _host_context_ref, _host_gate_ref)
+        if binding.gate.lock_reason not in {"explicit-manifest-intent", "unfinished-durable-mission", "unfinished-mission-integrity-error", "bootstrap-recovery"}:
+            raise ControllerError("MANIFEST_ENGAGEMENT_LOCKED")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        updated = apply_event_data(manifest, "record_capability_result", "capability:result", {"grant_id": grant_id, "result": result})
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "capability-result-recorded", "grant_id": grant_id, "result": deepcopy(dict(result)), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+
+    def manifest_clarify(
+        self,
+        *,
+        clarification: str,
+        _host_context_ref: str | None = None,
+        _host_gate_ref: str | None = None,
+    ) -> dict[str, Any]:
+        binding = self._binding("manifest_clarify", _host_context_ref, _host_gate_ref)
+        if not _nonempty(clarification):
+            raise ControllerError("CLARIFICATION_REQUIRED")
+        discovered = self._discover(binding.workspace_root)
+        manifest = discovered.manifest
+        updated = apply_event_data(manifest, "amend_authority", str(manifest.authority["operator_ref"]), {"amendment": clarification})
+        checkpoint = self._store(binding.workspace_root, manifest.mission_id).save(updated)
+        return {"status": "clarification-appended", "mission_id": updated.mission_id, "revision": updated.revision, "instruction": updated.authority["instruction"], "amendments": list(updated.authority["amendments"]), "checkpoint_ref": checkpoint.path, "checkpoint_sha256": checkpoint.sha256}
+
     def _normalize_definition(
         self, workspace: Path, definition: object
     ) -> tuple[dict[str, Any], dict[str, Any]]:

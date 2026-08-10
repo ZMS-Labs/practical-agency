@@ -133,6 +133,8 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.VERIFYING.value,
     },
     "record_action": {MissionStatus.ACTIVE.value},
+    "record_capability_request": {MissionStatus.ACTIVE.value, MissionStatus.BLOCKED.value},
+    "record_capability_result": {MissionStatus.ACTIVE.value, MissionStatus.BLOCKED.value},
     "record_observation": {
         MissionStatus.ACTIVE.value,
         MissionStatus.BLOCKED.value,
@@ -595,6 +597,48 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 "action_ref": action_ref,
             }
         )
+
+    elif event.kind == "record_capability_request":
+        if set(payload) != {"grant", "request"}:
+            raise TransitionError("CAPABILITY_REQUEST_EVENT_INVALID")
+        grant = payload.get("grant")
+        request = payload.get("request")
+        if not isinstance(grant, Mapping) or not isinstance(request, Mapping):
+            raise TransitionError("CAPABILITY_REQUEST_REQUIRED")
+        if grant.get("mission_id") != manifest.mission_id or grant.get("mission_revision") != manifest.revision:
+            raise TransitionError("CAPABILITY_GRANT_MISSION_MISMATCH")
+        grant_id = grant.get("grant_id")
+        if not isinstance(grant_id, str) or not grant_id:
+            raise TransitionError("CAPABILITY_GRANT_ID_REQUIRED")
+        invoked = data["capabilities"].setdefault("invoked", [])
+        if any(isinstance(item, Mapping) and item.get("grant_id") == grant_id for item in invoked):
+            raise TransitionError("CAPABILITY_GRANT_REPLAY")
+        invoked.append({"grant_id": grant_id, "grant": deepcopy(dict(grant)), "request": deepcopy(dict(request)), "result": None})
+        artifact = f"capability-grant:{grant_id}"
+        _append_unique(continuity["durable_artifacts"], artifact)
+        continuity["decisions"].append({"kind": "capability-request", "actor_ref": event.actor_ref, "grant_id": grant_id, "request": deepcopy(dict(request))})
+
+    elif event.kind == "record_capability_result":
+        if set(payload) != {"grant_id", "result"}:
+            raise TransitionError("CAPABILITY_RESULT_EVENT_INVALID")
+        grant_id = payload.get("grant_id")
+        result = payload.get("result")
+        if not isinstance(grant_id, str) or not isinstance(result, Mapping):
+            raise TransitionError("CAPABILITY_RESULT_REQUIRED")
+        invoked = [item for item in data["capabilities"].get("invoked", []) if isinstance(item, Mapping) and item.get("grant_id") == grant_id]
+        if len(invoked) != 1:
+            raise TransitionError("CAPABILITY_GRANT_NOT_FOUND")
+        record = invoked[0]
+        if record.get("result") is not None:
+            raise TransitionError("CAPABILITY_RESULT_REPLAY")
+        grant = record.get("grant")
+        if not isinstance(grant, Mapping) or result.get("returned_control_point") != grant.get("return_point"):
+            raise TransitionError("CAPABILITY_RETURN_POINT_MISMATCH")
+        if not isinstance(result.get("evidence_refs"), list) or not result.get("evidence_refs"):
+            raise TransitionError("CAPABILITY_EVIDENCE_REQUIRED")
+        record["result"] = deepcopy(dict(result))
+        _append_unique(continuity["durable_artifacts"], f"capability-result:{grant_id}")
+        continuity["decisions"].append({"kind": "capability-result", "actor_ref": event.actor_ref, "grant_id": grant_id, "verdict": result.get("verdict"), "coverage_limits": deepcopy(result.get("coverage_limits", [])), "evidence_refs": deepcopy(result.get("evidence_refs", []))})
 
     elif event.kind == "record_observation":
         artifact_ref = _required_string(

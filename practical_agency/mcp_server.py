@@ -79,6 +79,21 @@ TOOLS = [
         "inputSchema": _closed_schema({}),
     },
     {
+        "name": "manifest_capability_request",
+        "description": "Record one exact mission-bound non-mutating capability grant and request.",
+        "inputSchema": _closed_schema({"grant": {"type": "object"}, "request": {"type": "object"}}, ("grant", "request")),
+    },
+    {
+        "name": "manifest_capability_result",
+        "description": "Record a typed result for one previously granted capability request.",
+        "inputSchema": _closed_schema({"grant_id": {"type": "string", "minLength": 1}, "result": {"type": "object"}}, ("grant_id", "result")),
+    },
+    {
+        "name": "manifest_clarify",
+        "description": "Append an operator clarification without replacing mission intent.",
+        "inputSchema": _closed_schema({"clarification": {"type": "string", "minLength": 1}}, ("clarification",)),
+    },
+    {
         "name": "manifest_define",
         "description": "Create one durable draft from a closed operator-facing definition.",
         "inputSchema": _closed_schema(
