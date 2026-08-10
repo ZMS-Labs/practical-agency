@@ -6,14 +6,40 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-9-host-member-tests` |
+| Subject revision | `durable-capability-transaction-v1-stage-10-host-member-implementation` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T11:00:44Z` |
+| Prepared UTC | `2026-08-10T11:32:51Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0018-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0020-origin.md` |
+
+## Stage 10 superseding instructions
+
+Stage 9 is complete. ChatGPT Pro's exact tests-only relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0019-target.md`; its new one-test module is
+applied unchanged. The origin ran the exact test once. Both subtests failed at the intended API
+boundary: absent registry produced a `TypeError` for the five old caller-selection arguments, and
+the positive branch produced a `TypeError` because `host_capability_registry` is not an accepted
+reserved controller dependency. No fixture, schema, checkpoint, or observation-oracle failure
+occurred.
+
+The current outbound request is Stage 10 production implementation only. Return the smallest
+production-code unified diff that makes the committed Stage 9 test GREEN. Implement the repository
+consumer side of the Stage 8 reserved host registry/invoke/lookup contract with a fail-closed absent
+default; derive the typed need and unique member from durable state and host observation; issue with
+no caller selection arguments; execute with `grant_id` only; preserve the one-use/orphan boundaries;
+invoke the host member exactly once; validate and persist the exact member result plus bound host
+receipt; and never enter `execute_read` on this path.
+
+Do not invent or ship a real Codex host adapter, accept caller roots/handles/results, weaken existing
+legacy tests, enable web, integrate whole-mission proof, change principal handling, add shell or
+mutation, or claim tests were run. Preserve the current caller-selected local-read path only where
+existing tests require compatibility; the new no-selection path must fail closed without the
+reserved registry. Return the complete relay envelope in exactly one fenced `text` block with no
+prose before or after it and no nested fences. Instructions for Stages 1-9 below are historical
+context and are superseded by this section where they conflict.
 
 ## Stage 9 superseding instructions
 
