@@ -6,14 +6,42 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-7-positive-mcp-implementation` |
+| Subject revision | `durable-capability-transaction-v1-stage-8-member-boundary-review` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T10:26:40Z` |
+| Prepared UTC | `2026-08-10T10:39:38Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0014-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0016-origin.md` |
+
+## Stage 8 superseding instructions
+
+Stages 6 and 7 are complete and verified. ChatGPT Pro's exact implementation relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0015-target.md`; the real stdio MCP transaction,
+the focused 16-test module, the full 262-test suite with 2 skips, and all required gates pass.
+
+The current outbound request is Stage 8 architecture review only. Resolve the next Stage 3 blocker:
+the production package discovers no eligible member capability, while `check_package.py` enforces
+exactly one public `SKILL.md`; the MCP server is rooted in its own installed plugin; and the
+controller currently selects caller-named test descriptors but executes a built-in generic reader
+instead of invoking a member-owned method or accepting a member-owned typed verdict.
+
+Return one decisive architecture for the smallest truthful production member-capability boundary.
+It must preserve one public `manifest` skill, no static inventory, no arbitrary caller-provided
+capability root, no generic shell or mutation adapter, descriptor-digest re-observation, durable
+one-use grants, external/member ownership of method and verdict, and exact return-point/receipt
+binding. Explain how the installed MCP runtime obtains an authoritative set of external capability
+roots or, if Codex exposes no such substrate, name the minimal host integration contract that must
+exist instead of pretending discovery works. Also decide whether capability selection can remain a
+caller argument or must be derived from the durable blocker and descriptors.
+
+Review only: no code or tests in Stage 8. Return a GO/NO-GO verdict on implementing the current
+`FileSystemSkillProvider(plugin_root / "skills") + execute_read` architecture, a concrete replacement
+data/control flow, trust boundaries, named refusal behavior, and exactly one smallest test-first
+vertical slice. Do not broaden into web, mission-proof integration, principal authentication,
+sandboxed generic execution, or the final three-capability proof yet. Instructions for Stages 1-7
+below are historical context and are superseded by this section where they conflict.
 
 ## Stage 7 superseding instructions
 
