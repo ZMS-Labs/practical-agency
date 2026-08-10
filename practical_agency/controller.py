@@ -328,6 +328,13 @@ def _status_summary(manifest: MissionManifest) -> dict[str, Any]:
     }
 
 
+def _capability_effect_unknown_marker(manifest: MissionManifest) -> str | None:
+    for marker in manifest.integrity["unresolved_verdicts"]:
+        if marker.startswith("CAPABILITY_EFFECT_UNKNOWN:"):
+            return marker
+    return None
+
+
 class ManifestController:
     """Compose pathless mission operations without exposing storage identity."""
 
@@ -405,6 +412,35 @@ class ManifestController:
 
         manifest = discovered.manifest
         store = self._store(binding.workspace_root, manifest.mission_id)
+        recovery_checkpoint = None
+        for record in manifest.capabilities.get("invoked", []):
+            if (
+                not isinstance(record, Mapping)
+                or record.get("execution_state") != "in_progress"
+                or record.get("execution_owner_id") == self.process_instance_id
+            ):
+                continue
+            try:
+                manifest = apply_event_data(
+                    manifest,
+                    "mark_capability_execution_unknown",
+                    "mission-steward:capability",
+                    {"grant_id": record.get("grant_id")},
+                )
+            except TransitionError as error:
+                raise ControllerError(str(error)) from error
+            recovery_checkpoint = store.save(manifest)
+        unknown_marker = _capability_effect_unknown_marker(manifest)
+        if unknown_marker is not None:
+            checkpoint = recovery_checkpoint or discovered.receipt
+            return {
+                "status": "engaged",
+                **_status_summary(manifest),
+                "checkpoint_ref": checkpoint.path,
+                "checkpoint_sha256": checkpoint.sha256,
+                "drift_findings": [],
+                "process_instance_id": self.process_instance_id,
+            }
         try:
             definition = _durable_definition(manifest)
         except ControllerError:
@@ -581,6 +617,9 @@ class ManifestController:
             raise ControllerError("CAPABILITY_REQUEST_INVALID")
 
         discovered = self._discover(binding.workspace_root)
+        unknown_marker = _capability_effect_unknown_marker(discovered.manifest)
+        if unknown_marker is not None:
+            raise ControllerError(unknown_marker)
         descriptor = self._descriptor(capability_id)
         if (
             descriptor.input_contract != _CAPABILITY_REQUEST_CONTRACT
@@ -727,6 +766,9 @@ class ManifestController:
 
         discovered = self._discover(binding.workspace_root)
         manifest = discovered.manifest
+        unknown_marker = _capability_effect_unknown_marker(manifest)
+        if unknown_marker is not None:
+            raise ControllerError(unknown_marker)
         records = [
             item
             for item in manifest.capabilities.get("invoked", [])
@@ -829,6 +871,7 @@ class ManifestController:
                     "operation": operation,
                     "target": target,
                     "evidence_refs": refs,
+                    "execution_owner_id": self.process_instance_id,
                 },
             )
         except TransitionError as error:

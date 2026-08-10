@@ -139,6 +139,10 @@ _ALLOWED_FROM: dict[str, set[str]] = {
         MissionStatus.ACTIVE.value,
         MissionStatus.BLOCKED.value,
     },
+    "mark_capability_execution_unknown": {
+        MissionStatus.ACTIVE.value,
+        MissionStatus.BLOCKED.value,
+    },
     "record_capability_result": {MissionStatus.ACTIVE.value, MissionStatus.BLOCKED.value},
     "record_observation": {
         MissionStatus.ACTIVE.value,
@@ -513,7 +517,13 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
         reconciliation_blockers = [
             item
             for item in state["blockers"]
-            if _reconciliation_subject(item) is not None
+            if (
+                _reconciliation_subject(item) is not None
+                or (
+                    isinstance(item, str)
+                    and item.startswith("CAPABILITY_EFFECT_UNKNOWN:")
+                )
+            )
         ]
         if reconciliation_blockers and (
             not isinstance(reason, str) or reason in reconciliation_blockers
@@ -684,12 +694,14 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             "operation",
             "target",
             "evidence_refs",
+            "execution_owner_id",
         }:
             raise TransitionError("CAPABILITY_EXECUTION_EVENT_INVALID")
         grant_id = payload.get("grant_id")
         operation = payload.get("operation")
         target = payload.get("target")
         evidence_refs = payload.get("evidence_refs")
+        execution_owner_id = payload.get("execution_owner_id")
         if (
             not isinstance(grant_id, str)
             or not grant_id.strip()
@@ -697,6 +709,8 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             or not operation.strip()
             or not isinstance(target, str)
             or not target.strip()
+            or not isinstance(execution_owner_id, str)
+            or not execution_owner_id.strip()
             or not isinstance(evidence_refs, list)
             or not evidence_refs
             or any(
@@ -741,6 +755,8 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
             )
         except CapabilityGrantError as error:
             raise TransitionError(str(error)) from error
+        record["execution_attempt_id"] = event.event_id
+        record["execution_owner_id"] = execution_owner_id
         record["execution_state"] = "in_progress"
         continuity["decisions"].append(
             {
@@ -752,6 +768,34 @@ def apply_event(manifest: MissionManifest, event: MissionEvent) -> MissionManife
                 "target": target,
             }
         )
+
+    elif event.kind == "mark_capability_execution_unknown":
+        if set(payload) != {"grant_id"}:
+            raise TransitionError("CAPABILITY_UNKNOWN_EVENT_INVALID")
+        grant_id = payload.get("grant_id")
+        if not isinstance(grant_id, str) or not grant_id.strip():
+            raise TransitionError("CAPABILITY_GRANT_ID_REQUIRED")
+        invoked = [
+            item
+            for item in data["capabilities"].get("invoked", [])
+            if isinstance(item, Mapping) and item.get("grant_id") == grant_id
+        ]
+        if len(invoked) != 1:
+            raise TransitionError("CAPABILITY_GRANT_NOT_FOUND")
+        record = invoked[0]
+        if record.get("execution_state") != "in_progress":
+            raise TransitionError("CAPABILITY_GRANT_NOT_IN_PROGRESS")
+        if record.get("result") is not None:
+            raise TransitionError("CAPABILITY_RESULT_REPLAY")
+        grant = record.get("grant")
+        if not isinstance(grant, Mapping) or grant.get("used") is not True:
+            raise TransitionError("CAPABILITY_EXECUTION_STATE_INVALID")
+        marker = f"CAPABILITY_EFFECT_UNKNOWN:{grant_id}"
+        record["execution_state"] = "unknown"
+        _append_unique(state["blockers"], marker)
+        _append_unique(integrity["unresolved_verdicts"], marker)
+        state["status"] = MissionStatus.BLOCKED.value
+        state["next_action"] = f"external receipt required for {grant_id}"
 
     elif event.kind == "record_capability_result":
         if set(payload) != {"grant_id", "result"}:
