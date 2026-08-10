@@ -6,14 +6,42 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-8-member-boundary-review` |
+| Subject revision | `durable-capability-transaction-v1-stage-9-host-member-tests` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T10:39:38Z` |
+| Prepared UTC | `2026-08-10T11:00:44Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0016-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0018-origin.md` |
+
+## Stage 9 superseding instructions
+
+Stage 8 is complete. ChatGPT Pro's exact architecture relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0017-target.md`. Its verdict is NO-GO for the
+current `plugin_root / "skills" + execute_read` architecture and GO only behind a host-owned
+capability catalog plus opaque member invoke/lookup broker. The exact Codex integration does not yet
+expose that substrate; repository production must therefore fail closed when it is absent.
+
+The current outbound request is Stage 9 tests only. Return exactly one smallest RED vertical-slice
+test named `test_host_member_is_selected_from_durable_blocker_and_receipt_bound`, as specified by
+the Stage 8 recommended next action. The test may inject a fake implementation of the exact reserved
+host registry/broker protocol, but no caller-provided root, capability ID, blocker, operation,
+target, scope, result, or invocation handle may carry authority.
+
+The test must create one typed durable capability need from the mission blocker, expose one
+separately rooted non-mutating member descriptor through the fake host catalog, issue without
+selection arguments, execute with `grant_id` only, invoke the fake member exactly once, prove
+`execute_read` is never entered, receive a strict member-owned `capability-result@1` with verdict
+`FAIL` and coverage limits, and assert that the persisted grant, request, host invocation receipt,
+execution attempt, result, and exact return point are mutually bound. It must also require a
+fail-closed named refusal when the host registry is absent.
+
+Do not implement production code, alter existing tests, invent a real Codex host adapter, enable
+web, integrate whole-mission proof, change principal handling, add shell/mutation, or claim tests
+were run. Return the complete relay envelope in exactly one fenced `text` block with no prose before
+or after it and no nested fences. Instructions for Stages 1-8 below are historical context and are
+superseded by this section where they conflict.
 
 ## Stage 8 superseding instructions
 
