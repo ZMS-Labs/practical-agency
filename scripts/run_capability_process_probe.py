@@ -13,6 +13,10 @@ if str(ROOT) not in sys.path:
 
 from practical_agency.controller import ManifestController
 from practical_agency.host_evidence import write_host_context, write_host_gate
+from practical_agency.checkpoint_store import FileCheckpointStore
+from practical_agency.mission_repository import discover_active_mission
+from practical_agency.state_machine import apply_event_data
+from tests.helpers import record_fixture_verifier_result
 
 
 def refs(workspace: Path, root: Path, operation: str, turn: str, prompt: str = "$manifest probe") -> dict[str, str]:
@@ -51,4 +55,12 @@ if __name__ == "__main__":
             phases = ["define"] + [item for i in range(3) for item in (f"issue-{i}", f"execute-{i}")]
             for phase in phases:
                 subprocess.run([sys.executable, __file__, str(root), str(workspace), phase], cwd=ROOT, check=True, env={**__import__('os').environ, "PYTHONPATH": str(ROOT)})
-            print(json.dumps({"status":"PASS","processes":len(phases),"capability_classes":3,"checkpoints":len(list((workspace / "missions").rglob("*.json")))}))
+            manifest = discover_active_mission(workspace).manifest
+            observed = record_fixture_verifier_result(manifest, proof_ref="file:evidence.txt", subject_ref="file:evidence.txt", value="capability-result")
+            store = FileCheckpointStore(workspace / "missions" / observed.mission_id / "checkpoints")
+            store.save(observed)
+            verifying = apply_event_data(observed, "begin_verification", "mission-steward", {})
+            store.save(verifying)
+            completed = apply_event_data(verifying, "accept", "reviewer:independent", {"verdict":"PASS", "evidence_refs":["file:evidence.txt"], "coverage_limits":["process fixture only"], "separation_assurance":"declared-role-separation"})
+            store.save(completed)
+            print(json.dumps({"status":"PASS","processes":len(phases),"capability_classes":3,"final_status":completed.state["status"],"checkpoints":len(list((workspace / "missions").rglob("*.json")))}))
