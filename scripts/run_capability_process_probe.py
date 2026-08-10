@@ -33,14 +33,14 @@ def child(root: Path, workspace: Path, phase: str) -> None:
         controller.manifest_authorize(authority_contract_sha256=defined["authority_contract_sha256"], **refs(workspace, root, "manifest_authorize", "authorize", f"$manifest approve manifest {defined['authority_contract_sha256']}"))
         return
     index = int(phase.split("-")[1])
-    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"]),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"]),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"]))
-    operation, target, scope, evidence = cases[index]
+    cases = (("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"],{"source:https://example.test/source":"Example Domain"}))
+    operation, target, scope, evidence, payload = cases[index]
     if phase.startswith("issue"):
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"process-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))
         (workspace / f"grant-{index}.json").write_text(json.dumps(issued["grant"]), encoding="utf-8")
     else:
         grant = json.loads((workspace / f"grant-{index}.json").read_text(encoding="utf-8"))
-        controller.manifest_capability_execute(grant=grant, operation=operation, target=target, evidence_refs=evidence, **refs(workspace, root, "manifest_capability_execute", f"execute-{index}"))
+        controller.manifest_capability_execute(grant=grant, operation=operation, target=target, evidence_refs=evidence, evidence_payload=payload, **refs(workspace, root, "manifest_capability_execute", f"execute-{index}"))
 
 
 if __name__ == "__main__":

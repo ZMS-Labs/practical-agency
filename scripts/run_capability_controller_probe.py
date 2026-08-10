@@ -35,10 +35,10 @@ with tempfile.TemporaryDirectory(prefix="pa-capability-live-") as temp:
     defined = controller.manifest_define(definition=definition, **refs(workspace, root, "manifest_define", "define"))
     controller.manifest_authorize(authority_contract_sha256=defined["authority_contract_sha256"], **refs(workspace, root, "manifest_authorize", "authorize", f"$manifest approve manifest {defined['authority_contract_sha256']}"))
     results = []
-    for index, (operation, target, scope, evidence) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"]),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"]),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"]))):
+    for index, (operation, target, scope, evidence, payload) in enumerate((("file.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("resource.read","evidence.txt",["evidence.txt"],["evidence.txt"],{}),("web.open","https://example.test/source",["https://example.test/source","source:https://example.test/source"],["source:https://example.test/source"],{"source:https://example.test/source":"Example Domain"}))):
         controller = ManifestController(plugin_root=root)
         issued = controller.manifest_capability_issue(capability_id="dynamic-reader", blocking_condition=f"probe-{operation}", admitted_operation=operation, evidence_scope=scope, request={"operation":operation}, **refs(workspace, root, "manifest_capability_issue", f"issue-{index}"))
         controller = ManifestController(plugin_root=root)
-        executed = controller.manifest_capability_execute(grant=issued["grant"], operation=operation, target=target, evidence_refs=evidence, **refs(workspace, root, "manifest_capability_execute", f"execute-{index}"))
+        executed = controller.manifest_capability_execute(grant=issued["grant"], operation=operation, target=target, evidence_refs=evidence, evidence_payload=payload, **refs(workspace, root, "manifest_capability_execute", f"execute-{index}"))
         results.append(executed["result"]["verdict"])
     print(json.dumps({"status":"PASS","capability_classes":3,"results":results,"mission_checkpoint_count":len(list((workspace / "missions").rglob("*.json")))}))

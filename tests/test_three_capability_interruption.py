@@ -38,7 +38,7 @@ class ThreeCapabilityInterruptionTests(unittest.TestCase):
                 manifest = apply_event_data(manifest, "record_capability_request", "mission-steward", {"grant": grant, "request": {"operation": operation}})
                 # Simulate interruption: the next operation uses the reloaded manifest object.
                 reloaded = MissionManifest.from_dict(manifest.to_dict())
-                result = execute_read(grant, mission_id=reloaded.mission_id, mission_revision=grant["mission_revision"], operation=operation, target=target, workspace=root, evidence_refs=evidence_scope[1:] if operation == "web.open" else [target])
+                result = execute_read(grant, mission_id=reloaded.mission_id, mission_revision=grant["mission_revision"], operation=operation, target=target, workspace=root, evidence_refs=evidence_scope[1:] if operation == "web.open" else [target], evidence_payload={"source:https://example.test/source":"Example Domain"} if operation == "web.open" else None)
                 manifest = apply_event_data(reloaded, "record_capability_result", "capability:result", {"grant_id": grant["grant_id"], "result": result})
                 self.assertEqual(manifest.capabilities["invoked"][-1]["result"]["verdict"], "PASS")
             self.assertEqual(len(manifest.capabilities["invoked"]), 3)

@@ -542,6 +542,7 @@ class ManifestController:
         operation: str,
         target: str,
         evidence_refs: list[str] | None = None,
+        evidence_payload: Mapping[str, str] | None = None,
         _host_context_ref: str | None = None,
         _host_gate_ref: str | None = None,
     ) -> dict[str, Any]:
@@ -553,7 +554,7 @@ class ManifestController:
         try:
             result = execute_read(grant, mission_id=manifest.mission_id, mission_revision=manifest.revision,
                                   operation=operation, target=target, workspace=binding.workspace_root,
-                                  evidence_refs=evidence_refs)
+                                  evidence_refs=evidence_refs, evidence_payload=evidence_payload)
         except CapabilityOperationError as error:
             raise ControllerError(str(error)) from error
         updated = apply_event_data(manifest, "record_capability_result", "capability:result", {"grant_id": grant.get("grant_id"), "result": result})

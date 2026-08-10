@@ -96,7 +96,7 @@ TOOLS = [
     {
         "name": "manifest_capability_execute",
         "description": "Execute exactly one granted non-mutating file, resource, or declared web read.",
-        "inputSchema": _closed_schema({"grant": {"type": "object"}, "operation": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "evidence_refs": {"type": "array", "items": {"type": "string"}}}, ("grant", "operation", "target")),
+        "inputSchema": _closed_schema({"grant": {"type": "object"}, "operation": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "evidence_refs": {"type": "array", "items": {"type": "string"}}, "evidence_payload": {"type": "object"}}, ("grant", "operation", "target")),
     },
     {
         "name": "manifest_clarify",

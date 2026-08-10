@@ -36,7 +36,8 @@ class CapabilityOperationTests(unittest.TestCase):
         grant["evidence_scope"].append("source:https://example.test/source")
         result = execute_read(grant, mission_id="m1", mission_revision=2,
                               operation="web.open", target="https://example.test/source",
-                              workspace=Path("."), evidence_refs=["source:https://example.test/source"])
+                              workspace=Path("."), evidence_refs=["source:https://example.test/source"],
+                              evidence_payload={"source:https://example.test/source": "Example Domain"})
         self.assertEqual(result["verdict"], "PASS")
         with self.assertRaisesRegex(CapabilityOperationError, "SOURCE_EVIDENCE_REQUIRED"):
             execute_read(self._grant("web.open", "https://example.test/source"), mission_id="m1", mission_revision=2,
