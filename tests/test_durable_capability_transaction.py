@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import socket
+import subprocess
+import sys
 import tempfile
 import unittest
 from collections.abc import Mapping
@@ -14,6 +17,7 @@ from typing import Any
 from unittest.mock import patch
 
 import practical_agency.capability_operations as capability_operations
+import practical_agency.controller as controller_module
 from practical_agency.checkpoint_store import FileCheckpointStore
 from practical_agency.controller import ControllerError, ManifestController
 from practical_agency.host_evidence import write_host_context, write_host_gate
@@ -112,6 +116,80 @@ class _HttpResponse:
 
     def read(self) -> bytes:
         return b"network observation"
+
+
+_ORPHAN_WORKER = "--orphan-worker"
+_EXIT_BEFORE_READ = 91
+_EXIT_AFTER_READ = 92
+
+
+def _run_orphan_worker(arguments: list[str]) -> None:
+    action, runtime, workspace, journal, context_ref, gate_ref, *grant = arguments
+    runtime_path = Path(runtime)
+    workspace_path = Path(workspace)
+    journal_path = Path(journal)
+    target = (workspace_path / "evidence.txt").resolve()
+    original_read_text = Path.read_text
+
+    def observed_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path.resolve() == target:
+            descriptor = os.open(
+                journal_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600
+            )
+            try:
+                os.write(descriptor, b"read\n")
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        return original_read_text(path, *args, **kwargs)
+
+    Path.read_text = observed_read
+    controller = ManifestController(plugin_root=runtime_path)
+    refs = {
+        "_host_context_ref": context_ref,
+        "_host_gate_ref": gate_ref,
+    }
+    try:
+        if action.startswith("crash-"):
+            original_execute_read = controller_module.execute_read
+
+            def forced_exit(*args: object, **kwargs: object) -> None:
+                if action == "crash-after-read":
+                    original_execute_read(*args, **kwargs)
+                    os._exit(_EXIT_AFTER_READ)
+                os._exit(_EXIT_BEFORE_READ)
+
+            controller_module.execute_read = forced_exit
+        if action == "engage":
+            result = controller.manifest_engage(**refs)
+        elif action == "issue":
+            result = controller.manifest_capability_issue(
+                capability_id="dynamic-reader",
+                blocking_condition="inspect the bounded evidence",
+                admitted_operation="file.read",
+                evidence_scope=["evidence.txt"],
+                request={
+                    "bounded_question_or_action": "file.read:evidence.txt",
+                    "requested_permissions": ["repository:read"],
+                    "requested_effects": ["evidence.txt"],
+                    "estimated_costs": ["bounded reads"],
+                    "timeout_or_stop_condition": "stop after one bounded observation",
+                },
+                **refs,
+            )
+        else:
+            result = controller.manifest_capability_execute(
+                grant_id=grant[0],
+                operation="file.read",
+                target="evidence.txt",
+                evidence_refs=["evidence.txt"],
+                evidence_payload=None,
+                **refs,
+            )
+    except RuntimeError as error:
+        print(json.dumps({"error": str(error)}), flush=True)
+    else:
+        print(json.dumps({"result": result}), flush=True)
 
 
 class DurableCapabilityTransactionRedTests(unittest.TestCase):
@@ -321,6 +399,227 @@ class DurableCapabilityTransactionRedTests(unittest.TestCase):
 
         with patch.object(Path, "read_text", new=counted):
             yield calls
+
+    @staticmethod
+    def _read_count(journal: Path) -> int:
+        return (
+            len(journal.read_text(encoding="utf-8").splitlines())
+            if journal.exists()
+            else 0
+        )
+
+    def _orphan_process(
+        self,
+        runtime: Path,
+        workspace: Path,
+        journal: Path,
+        action: str,
+        turn: str,
+        grant_id: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        operation = {
+            "engage": "manifest_engage",
+            "issue": "manifest_capability_issue",
+        }.get(action, "manifest_capability_execute")
+        refs = self._refs(workspace, runtime, operation, turn)
+        command = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            _ORPHAN_WORKER,
+            action,
+            str(runtime),
+            str(workspace),
+            str(journal),
+            refs["_host_context_ref"],
+            refs["_host_gate_ref"],
+        ]
+        if grant_id is not None:
+            command.append(grant_id)
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = os.pathsep.join([str(runtime), str(ROOT)])
+        return subprocess.run(
+            command,
+            cwd=runtime,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    @staticmethod
+    def _worker_payload(
+        completed: subprocess.CompletedProcess[str],
+    ) -> dict[str, Any]:
+        if completed.returncode != 0:
+            raise AssertionError(
+                f"returncode={completed.returncode} "
+                f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
+            )
+        payload = json.loads(completed.stdout)
+        if not isinstance(payload, dict):
+            raise AssertionError(f"worker payload is not an object: {payload!r}")
+        return payload
+
+    def _assert_orphan_fails_closed(
+        self,
+        *,
+        crash_action: str,
+        expected_exit: int,
+        reads_after_crash: int,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            runtime, workspace, controller = self._setup(base)
+            issued = self._issue(
+                controller,
+                workspace,
+                runtime,
+                turn=f"{crash_action}-issue",
+            )
+            grant_id = self._grant_id(issued)
+            journal = base / "observations.log"
+
+            crash = self._orphan_process(
+                runtime,
+                workspace,
+                journal,
+                crash_action,
+                f"{crash_action}-execute",
+                grant_id,
+            )
+            self.assertEqual(
+                crash.returncode,
+                expected_exit,
+                f"stdout={crash.stdout!r} stderr={crash.stderr!r}",
+            )
+            begun = discover_active_mission(workspace).manifest
+            begun_record = self._record(begun, grant_id)
+            self.assertEqual(begun_record.get("execution_state"), "in_progress")
+            self.assertIsNone(begun_record.get("result"))
+            self.assertIs(begun_record["grant"].get("used"), True)
+            self.assertEqual(self._read_count(journal), reads_after_crash)
+
+            engagement = self._worker_payload(
+                self._orphan_process(
+                    runtime,
+                    workspace,
+                    journal,
+                    "engage",
+                    f"{crash_action}-engage",
+                )
+            )["result"]
+            recovered = discover_active_mission(workspace).manifest
+            recovered_record = self._record(recovered, grant_id)
+            reads_after_engage = self._read_count(journal)
+            marker = f"CAPABILITY_EFFECT_UNKNOWN:{grant_id}"
+
+            retry = self._worker_payload(
+                self._orphan_process(
+                    runtime,
+                    workspace,
+                    journal,
+                    "execute",
+                    f"{crash_action}-retry",
+                    grant_id,
+                )
+            )
+            replacement_issue = self._worker_payload(
+                self._orphan_process(
+                    runtime,
+                    workspace,
+                    journal,
+                    "issue",
+                    f"{crash_action}-replacement-issue",
+                )
+            )
+            replacement_execute: dict[str, Any] | None = None
+            replacement = replacement_issue.get("result")
+            if isinstance(replacement, Mapping):
+                replacement_execute = self._worker_payload(
+                    self._orphan_process(
+                        runtime,
+                        workspace,
+                        journal,
+                        "execute",
+                        f"{crash_action}-replacement-execute",
+                        self._grant_id(replacement),
+                    )
+                )
+
+            final = discover_active_mission(workspace).manifest
+            final_record = self._record(final, grant_id)
+            observed = {
+                "recovery_checkpoint_created": recovered.revision > begun.revision,
+                "engagement_revision": engagement.get("revision"),
+                "recovered_execution_state": recovered_record.get(
+                    "execution_state"
+                ),
+                "recovered_result": recovered_record.get("result"),
+                "recovered_status": recovered.state.get("status"),
+                "recovered_blocker": marker
+                in recovered.state.get("blockers", []),
+                "recovered_unresolved": marker
+                in recovered.integrity.get("unresolved_verdicts", []),
+                "reads_after_engage": reads_after_engage,
+                "execution_state": final_record.get("execution_state"),
+                "grant_used": final_record["grant"].get("used"),
+                "result": final_record.get("result"),
+                "mission_status": final.state.get("status"),
+                "engagement_status": engagement.get("mission_status"),
+                "blocker": marker in final.state.get("blockers", []),
+                "unresolved": marker
+                in final.integrity.get("unresolved_verdicts", []),
+                "result_artifact": f"capability-result:{grant_id}"
+                in final.continuity.get("durable_artifacts", []),
+                "result_decision": any(
+                    isinstance(item, Mapping)
+                    and item.get("kind") == "capability-result"
+                    and item.get("grant_id") == grant_id
+                    for item in final.continuity.get("decisions", [])
+                ),
+                "original_retry_refused": "error" in retry
+                and "result" not in retry,
+                "replacement_issue_error": replacement_issue.get("error"),
+                "replacement_execute": (
+                    "not-issued"
+                    if replacement_execute is None
+                    else replacement_execute.get("error")
+                    or "executed"
+                ),
+                "observation_count": self._read_count(journal),
+                "grant_ids": [
+                    item.get("grant_id")
+                    for item in final.capabilities.get("invoked", [])
+                    if isinstance(item, Mapping)
+                ],
+            }
+            self.assertEqual(
+                observed,
+                {
+                    "recovery_checkpoint_created": True,
+                    "engagement_revision": recovered.revision,
+                    "recovered_execution_state": "unknown",
+                    "recovered_result": None,
+                    "recovered_status": "blocked",
+                    "recovered_blocker": True,
+                    "recovered_unresolved": True,
+                    "reads_after_engage": reads_after_crash,
+                    "execution_state": "unknown",
+                    "grant_used": True,
+                    "result": None,
+                    "mission_status": "blocked",
+                    "engagement_status": "blocked",
+                    "blocker": True,
+                    "unresolved": True,
+                    "result_artifact": False,
+                    "result_decision": False,
+                    "original_retry_refused": True,
+                    "replacement_issue_error": marker,
+                    "replacement_execute": "not-issued",
+                    "observation_count": reads_after_crash,
+                    "grant_ids": [grant_id],
+                },
+            )
 
     @staticmethod
     def _mcp_call(
@@ -557,6 +856,20 @@ class DurableCapabilityTransactionRedTests(unittest.TestCase):
             self.assertEqual(len(reads), 1)
             self.assertEqual(replayed_result, first_result)
             self.assertEqual(str(refusal), "CAPABILITY_RESULT_REPLAY")
+
+    def test_orphaned_execution_before_target_read_fails_closed(self) -> None:
+        self._assert_orphan_fails_closed(
+            crash_action="crash-before-read",
+            expected_exit=_EXIT_BEFORE_READ,
+            reads_after_crash=0,
+        )
+
+    def test_orphaned_execution_after_one_target_read_fails_closed(self) -> None:
+        self._assert_orphan_fails_closed(
+            crash_action="crash-after-read",
+            expected_exit=_EXIT_AFTER_READ,
+            reads_after_crash=1,
+        )
 
     def test_web_operation_refuses_before_retrieval_resolution_or_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -869,4 +1182,7 @@ class DurableCapabilityTransactionRedTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if sys.argv[1:2] == [_ORPHAN_WORKER]:
+        _run_orphan_worker(sys.argv[2:])
+    else:
+        unittest.main()

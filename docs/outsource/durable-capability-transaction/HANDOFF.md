@@ -6,14 +6,37 @@
 | State | `READY` |
 | Work ID | `durable-capability-transaction` |
 | Subject ref | `ZMS-Labs/practical-agency#10` |
-| Subject revision | `durable-capability-transaction-v1-stage-4-orphan-tests` |
+| Subject revision | `durable-capability-transaction-v1-stage-5-orphan-implementation` |
 | Valid while | `subject-revision-unchanged` |
 | Coverage limits | `ChatGPT Pro can provide source patches but cannot mutate, execute, commit, push, or certify this repository` |
 | Baseline parent | `130631153ac5b75cb4caea2d2b358ee24f1afe00` |
 | Packet commit | `supplied by the immutable prompt URL after publication` |
-| Prepared UTC | `2026-08-10T08:50:56Z` |
+| Prepared UTC | `2026-08-10T09:28:24Z` |
 | Supersedes | `NONE; follows the completed manifest-capability-orchestration-review handoff` |
-| Relay head | `docs/outsource/durable-capability-transaction/relay/0008-origin.md` |
+| Relay head | `docs/outsource/durable-capability-transaction/relay/0010-origin.md` |
+
+## Stage 5 superseding instructions
+
+Stage 4 is complete. ChatGPT Pro's exact tests-only relay is retained at
+`docs/outsource/durable-capability-transaction/relay/0009-target.md`; its diff is applied unchanged
+to `tests/test_durable_capability_transaction.py`. The origin ran the focused module: all 15 tests
+executed, the 13 pre-existing controls passed, and only the two new orphaned-execution cases failed.
+Both failed at the shared durable outcome because engagement created no recovery checkpoint and left
+the original transaction `in_progress` without the required unknown marker or replacement guard.
+
+The current outbound request is Stage 5 production implementation only. Return the smallest
+production-code unified diff that makes the committed Stage 4 tests GREEN. Persist an execution
+attempt and owner identity at begin; on pathless replacement-process engagement, classify an
+orphaned `in_progress` transaction as `unknown`, block the mission with
+`CAPABILITY_EFFECT_UNKNOWN:<grant_id>` in both blockers and unresolved verdicts, preserve the used
+grant and null result, and refuse original retry or replacement issue/execute for that unresolved
+return point without target observation.
+
+Do not change, weaken, skip, special-case, or delete tests. Do not repair the other Stage 3 findings,
+enable web, broaden discovery, add shell or mutation, add reconciliation without an external
+receipt, or claim tests were run. Return the complete relay envelope in exactly one fenced `text`
+block with no prose before or after it and no nested fences. Instructions for Stages 1-4 below are
+historical context and are superseded by this section where they conflict.
 
 ## Stage 4 superseding instructions
 
