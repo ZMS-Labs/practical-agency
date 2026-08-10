@@ -9,6 +9,7 @@ from practical_agency.capability_operations import execute_read
 from practical_agency.manifest_model import MissionManifest
 from practical_agency.state_machine import apply_event_data
 from tests.helpers import clone_payload
+from tests.helpers import record_fixture_verifier_result
 
 
 class ThreeCapabilityInterruptionTests(unittest.TestCase):
@@ -16,7 +17,9 @@ class ThreeCapabilityInterruptionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "evidence.txt").write_text("file-proof", encoding="utf-8")
-            manifest = MissionManifest.from_dict(clone_payload())
+            payload = clone_payload()
+            payload["integrity"]["completion_acceptor"] = "reviewer:independent"
+            manifest = MissionManifest.from_dict(payload)
             manifest = apply_event_data(manifest, "approve", "operator:test", {"checkpoint_ref": "checkpoint:1"})
             cases = [
                 ("file.read", "evidence.txt", ["evidence.txt"]),
@@ -40,6 +43,20 @@ class ThreeCapabilityInterruptionTests(unittest.TestCase):
                 self.assertEqual(manifest.capabilities["invoked"][-1]["result"]["verdict"], "PASS")
             self.assertEqual(len(manifest.capabilities["invoked"]), 3)
             self.assertEqual(manifest.authority["instruction"], clone_payload()["authority"]["instruction"])
+            manifest = record_fixture_verifier_result(manifest)
+            manifest = apply_event_data(manifest, "begin_verification", "mission-steward", {})
+            completed = apply_event_data(
+                manifest,
+                "accept",
+                "reviewer:independent",
+                {
+                    "verdict": "PASS",
+                    "evidence_refs": ["artifact:independent-review"],
+                    "coverage_limits": ["deterministic fixture only"],
+                    "separation_assurance": "declared-role-separation",
+                },
+            )
+            self.assertEqual(completed.state["status"], "completed")
 
 
 if __name__ == "__main__":
