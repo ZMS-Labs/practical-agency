@@ -1,5 +1,17 @@
 # Practical Agency
 
+> **⚠ PARKED (2026-08-11) — prior art and proof corpus; no active development.**
+> The custody semantics pioneered here were folded into the
+> [`mission-custody@1` contract family in epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)
+> after an adversarial review whose verdict was "a real, rare,
+> mechanically-demonstrated capability that is currently unwired" — not archive,
+> fold. Full rationale, lineage, known defects, and the revival condition:
+> [`docs/adr/0001-park-and-fold-disposition.md`](docs/adr/0001-park-and-fold-disposition.md).
+> **Do not release from `main`**: it is a day-0 surface retaining a coordinator
+> authority-bypass and a reject dead-end that later branch work fixed
+> (see the ADR). Nothing here is deleted; branches, proofs, and the
+> claims-discipline record remain inspectable.
+
 Practical Agency is human-authorized mission control for carrying intent through
 durable, coordinated, resumable action.
 
@@ -24,13 +36,14 @@ Licensed under [GPL-3.0-or-later](LICENSE).
 
 ## Current status
 
-`0.1.0` remains an **unreleased** version. This branch adds a stdlib
-deterministic mission kernel (`mission-manifest@1`, authority/transitions,
-atomic checkpoints, dynamic capability discovery, bounded coordinator) and
-upgrades the sole public `manifest` skill. It is still **not** a production
-runtime: no daemon, hosted service, autonomous background actor, or production
-execution adapter is claimed. Live harness loading and comparative efficacy
-remain unverified until exercised per harness.
+**Parked.** `0.1.0` was never released (the tag was operator-waived in favor of
+building worth; see the ADR). This `main` is the day-0 merged surface only —
+the substantially larger live-engagement work remains on its branch, unmerged
+by design. Historical status claims below this line describe the project as it
+stood while active; the honesty tables (PROVEN / UNVERIFIED / NOT CLAIMED)
+remain accurate for the states they describe. Comparative efficacy versus an
+ordinary skilled agent was never established here — that question transferred
+to the folded design's tracer-mission retro.
 
 ## What this is
 
