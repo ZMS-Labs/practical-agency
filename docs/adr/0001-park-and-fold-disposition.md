@@ -2,6 +2,7 @@
 
 **Status:** accepted (operator-directed, 2026-08-11)
 **Date:** 2026-08-11
+**Canonical estate record:** ADR-184 in the operator's private governance registry — this file is its public-safe projection (numbered locally; this repo has no ADR sequence of its own)
 
 ## Context — genesis and lineage
 
