@@ -6,7 +6,8 @@
 > after an adversarial review whose verdict was "a real, rare,
 > mechanically-demonstrated capability that is currently unwired" — not archive,
 > fold. Full rationale, lineage, known defects, and the revival condition:
-> [`docs/adr/0001-park-and-fold-disposition.md`](docs/adr/0001-park-and-fold-disposition.md).
+> [`docs/adr/0001-park-and-fold-disposition.md`](docs/adr/0001-park-and-fold-disposition.md)
+> (public projection of estate governance record ADR-184).
 > **Do not release from `main`**: it is a day-0 surface retaining a coordinator
 > authority-bypass and a reject dead-end that later branch work fixed
 > (see the ADR). Nothing here is deleted; branches, proofs, and the
