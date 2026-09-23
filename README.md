@@ -1,136 +1,69 @@
 # Practical Agency
 
-> **⚠ PARKED (2026-08-11) — prior art and proof corpus; no active development.**
-> The custody semantics pioneered here were folded into the
-> [`mission-custody@1` contract family in epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)
-> after an adversarial review whose verdict was "a real, rare,
-> mechanically-demonstrated capability that is currently unwired" — not archive,
-> fold. Full rationale, lineage, known defects, and the revival condition:
-> [`docs/adr/0001-park-and-fold-disposition.md`](docs/adr/0001-park-and-fold-disposition.md)
-> (public projection of estate governance record ADR-184).
-> **Do not release from `main`**: it is a day-0 surface retaining a coordinator
-> authority-bypass and a reject dead-end that later branch work fixed
-> (see the ADR). Nothing here is deleted; branches, proofs, and the
-> claims-discipline record remain inspectable.
+> **Archived on 2026-08-11 and kept as a read-only record. Nothing new is being built here.**
+>
+> This project was about handing long pieces of work to AI agents, the AI tools that carry out a multi-step task on their own. Its ideas covered recording who authorized the work, where progress was saved and who besides the agent checked the result. Those ideas now live in the [`mission-custody@1` contracts](https://github.com/ZMS-Labs/epistemic-skills/tree/main/plugins/epistemic-skills/contracts/mission-custody) (machine-checkable record formats) in epistemic-skills, added in [PR #114](https://github.com/ZMS-Labs/epistemic-skills/pull/114).
+>
+> An internal review I ran with AI reviewers on 2026-08-10 came back as a no-go on continuing this repository as it was. The AI judge's summary described the work as "a real, rare, mechanically-demonstrated capability that is currently unwired." None of the reviewers recommended dropping the ideas, and I chose to move them into epistemic-skills. The reasons, the known defects and the conditions for reopening are in the project's decision record, [ADR 0001](docs/adr/0001-park-and-fold-disposition.md).
+>
+> **Do not install or release from `main`.** The ADR names two defects that block release. First, when a step is refused, the coordinator can re-approve it as a write to a hardcoded example file and send it anyway. The coordinator is the part that picks and sends out the next step. Second, once a reviewer rejects a mission, it can never be accepted. The later branch [`codex/manifest-live-engagement`](https://github.com/ZMS-Labs/practical-agency/tree/codex/manifest-live-engagement) fixed the first defect, and the epistemic-skills version was designed so a failed review can be cleared. All [branches](https://github.com/ZMS-Labs/practical-agency/branches/all) and proof records are preserved.
 
-Practical Agency is human-authorized mission control for carrying intent through
-durable, coordinated, resumable action.
+## Using this today
 
-Its sole public entry skill is `manifest`.
+Use the maintained [`manifest` skill in epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills/tree/main/plugins/epistemic-skills/skills/manifest) instead. A skill is a set of written instructions an AI agent loads for one kind of task. The installation notes below are kept for the record only. Installing this repository's skill next to epistemic-skills would give you two different skills named `manifest`.
 
-Practical Agency does not give an artificial agent independent ends. It extends
-the operator's agency through bounded delegation: the operator owns the purpose,
-authority, protected state, acceptable costs, and right to interrupt; the system
-preserves those constraints while coordinating workflow, epistemic discipline,
-execution substrates, continuity, and independent proof.
+## What this was
 
-| Concept | Name |
-| --- | --- |
-| Project | Practical Agency |
-| Public skill | `manifest` |
-| Doctrine | Bounded delegated agency |
-| Role | Mission steward |
-| Artifact | Mission manifest |
-| Distribution | `zms-practical-agency` |
+I wanted AI agents to take the same care every time on work that mattered. The project asked who may act, on what, for how long, when to stop, and what record survives when the chat ends. Each piece of work was a mission, a bounded task with explicit permission, and each mission had a written record called a mission manifest.
 
-Licensed under [GPL-3.0-or-later](LICENSE).
+AI tools write the code. I decide what each project is for and check what comes back. Here, AI coding agents in three different tools made about 200 commits over four days in August 2026. They started with three competing first versions, and one was kept.
 
-## Current status
+## The mission manifest
 
-**Parked.** `0.1.0` was never released (the tag was operator-waived in favor of
-building worth; see the ADR). This `main` is the day-0 merged surface only —
-the substantially larger live-engagement work remains on its branch, unmerged
-by design. Historical status claims below this line describe the project as it
-stood while active; the honesty tables (PROVEN / UNVERIFIED / NOT CLAIMED)
-remain accurate for the states they describe. Comparative efficacy versus an
-ordinary skilled agent was never established here — that question transferred
-to the folded design's tracer-mission retro.
+A mission manifest is a short file, kept in version control, that answers five questions:
 
-## What this is
+- Intent: what outcome the person wants, in their own words where possible.
+- Scope: what is in, what is out, and which environments are touched.
+- Authorization: what the agent may do without asking again, and what needs fresh consent.
+- Evidence: where proof of progress and completion must be recorded.
+- Stop / hold: conditions that pause or end the mission.
 
-Most agent stacks optimize *execution*: plans, tools, and verification loops.
-Practical Agency optimizes *delegation*: who may act, on what scope, for how
-long, with what stop rules, and what durable record survives when the chat ends.
+The field guide and a template are in [`docs/mission-manifest.md`](docs/mission-manifest.md). The machine-checkable format, `mission-manifest@1`, is defined in [`contracts/mission-manifest.schema.json`](contracts/mission-manifest.schema.json).
 
-The steward does not replace the sovereign (the human). It holds continuity for a
-**mission** — a bounded slice of work with explicit authorization — and refuses
-to expand agency beyond what the manifest records.
+The repository's one skill, [`manifest`](skills/manifest/SKILL.md), covers how to open, resume, pause, hand off and close a mission without quietly widening its scope. The code could also keep a record from the epistemic-skills [`watch`](https://github.com/ZMS-Labs/epistemic-skills/tree/main/plugins/epistemic-skills/skills/watch) skill. That skill sets up an outside monitor for something that has to be noticed between sessions. Deciding whether that record was proven stayed with the `watch` skill's own checker.
 
-## Quick start
+## Where things stand
 
-1. Install the package for your harness (see [Installation](#installation)).
-2. When a task is more than a single reversible edit — multi-step, cross-session,
-   consequential, or shared across agents — invoke **`manifest`** before
-   expanding scope.
-3. Author or update a **mission manifest** at the mission's authoritative sink
-   (usually the repo or project root). Treat the manifest as the contract of
-   record; chat is not.
+Version `0.1.0` was never tagged or released. On 2026-08-08 I [put off tagging it](https://github.com/ZMS-Labs/practical-agency/blob/codex/manifest-live-engagement/docs/release/OPERATOR-WAIVER-DEFER-0.1.0-RELEASE-2026-08-08.md) so the time would go into making it worth using.
 
-## The `manifest` skill
+`main` holds the first version, merged on 2026-08-07. What was proven, left unverified and not claimed at the time is listed in [RELEASE-0.1.0.md](docs/release/RELEASE-0.1.0.md). Two defects found afterwards are recorded in the ADR.
 
-The only published skill in this package is [`manifest`](skills/manifest/SKILL.md).
-It tells a mission steward how to:
+The later work is on the [unmerged, archived branch `codex/manifest-live-engagement`](https://github.com/ZMS-Labs/practical-agency/tree/codex/manifest-live-engagement). Its own README has no archive notice and still reads as current. The branch includes a script, `scripts/run_controller_process_proof.py`, that runs one mission across three separate processes. It kills each process before starting the next, then checks that the mission picks up where it left off and repairs a changed file. The script lists three limits of its own. Its checks don't wall the agent off at the operating-system level, and it isn't proven that they can't be bypassed. They also don't prove that the worker and the reviewer are different parties. The branch also holds an install check in one tool, recorded on 2026-08-10 (`docs/proofs/2026-08-10-codex-plugin-reinstall-and-catalog.json`).
 
-- open, resume, or close a mission without silent scope creep;
-- bind human authorization to concrete allowed actions;
-- persist decisions and stop conditions in a mission manifest;
-- hand off or pause without losing defensibility.
+The review's deciding finding was that the project's own adoption test had never been scheduled. That test asked whether people would use it instead of working around it. Meanwhile the valuable work sat on that one unmerged branch. Whether this approach does better than an ordinary capable AI agent was never measured.
 
-## Mission manifest (artifact)
+## Installation (kept for the record, not recommended)
 
-A mission manifest is a small, version-controlled document that answers:
-
-- **Intent** — what outcome the sovereign wants, in their words where possible.
-- **Scope** — inclusions, exclusions, and environments touched.
-- **Authorization** — what the steward may do without re-asking; what requires fresh consent.
-- **Evidence** — where proof of progress and completion must land.
-- **Stop / hold** — conditions that pause or end the mission.
-
-See [`docs/mission-manifest.md`](docs/mission-manifest.md) for the v0 field guide
-and template. The target machine-checkable carrier is `mission-manifest@1`.
-
-## Installation
-
-### Cursor
-
-Add this repository as a plugin source, or copy `skills/manifest/` into your
-project's skills directory. Reload the session so skill discovery runs.
-
-### Generic Agent Skills layout
+These notes describe how the skill was meant to be installed while the project was active. For Cursor, they said to add the repository as a plugin source, or to copy `skills/manifest/` into a project's skills directory and reload the session. For other tools, they gave the generic Agent Skills layout:
 
 ```text
 your-project/
-  .agents/skills/manifest/   # or your harness's skills root
+  .agents/skills/manifest/   # or your tool's skills folder
     SKILL.md
 ```
 
-Point your harness at the skill root per its documentation.
+The package name in `pyproject.toml` is `zms-practical-agency`, and it was never published to PyPI.
 
-## Relationship to other ZMS packages
+## Tests
 
-- **[epistemic-skills](https://github.com/ZMS-Labs/epistemic-skills)** — what must be *true* before a claim bears load (including commission-watch).
-- **Practical Agency** — what a steward is *allowed* to do while pursuing a mission, and what must be *recorded* so work survives compaction.
-
-Use both when missions are consequential and claims must be defensible.
-`manifest` may custody a validated `watch-commission@1` record when installed
-with a compatible adapter; it must not promote commission state itself.
-
-## Developing
+This repository is read-only. The tests still run:
 
 ```bash
 python -m unittest discover -s tests -p 'test_*.py' -v
 python -m compileall -q practical_agency tests
 ```
 
-Deterministic mission custody is proven by the in-process end-to-end fixture.
-No production external execution adapter is included yet. No background service
-is claimed. Live harness loading is unverified until tested in each packaged
-harness. End-to-end mission benefit over an ordinary skilled agent remains
-unestablished until comparative evaluation exists.
-
-Follow the [DCO](https://developercertificate.org/) sign-off on commits
-(`Signed-off-by: SternOne <89846440+SternOne@users.noreply.github.com>` for
-maintainer commits on this program).
+All 54 tests passed when rerun on 2026-09-23. One end-to-end test, [`tests/test_end_to_end_mission.py`](tests/test_end_to_end_mission.py), runs a mission in a single process. The mission is saved and reloaded, and the worker's own attempt to accept it is refused. A reviewer other than the worker then accepts it. The test does not cover a step that is refused permission, which is where the first defect above sits. No production adapter for external execution is included, and no background service is claimed.
 
 ## License
 
