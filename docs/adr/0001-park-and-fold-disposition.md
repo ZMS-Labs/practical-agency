@@ -4,6 +4,8 @@
 **Date:** 2026-08-11
 **Canonical estate record:** ADR-184 in the operator's private governance registry — this file is its public-safe projection (numbered locally; this repo has no ADR sequence of its own)
 
+> Note added 2026-09-23: this was written as an internal decision record, and the text below is unchanged. "The operator" means me, Zach Stern. The review record and the ADR-184 registry it cites are private. The proofs it calls reproducible from this tree are on the unmerged branch [`codex/manifest-live-engagement`](https://github.com/ZMS-Labs/practical-agency/tree/codex/manifest-live-engagement), not on `main`. Where the review says "not archive", it meant not dropping the ideas. The repository was set to read-only on GitHub on 2026-08-11, after the ideas moved to epistemic-skills.
+
 ## Context — genesis and lineage
 
 practical-agency was created 2026-08-07 as the successor to "helix," a rejected
